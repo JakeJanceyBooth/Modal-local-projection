@@ -1,8 +1,8 @@
-# all estimation functions
+# all estimation functions: prediction and response functions
 # LMP/MEM estimator with multi-start, stopping rule, and bandwidth calculation
 # mean LP and IRFs
-# median/quantile LP and IRFs
-# VARs and IRFs
+# median/quantile LP and RFs
+# VARs and RFs
 
 # estimators take arguments y, x, optionally z, and horizons
 # estimators return horizons, n_h for each h, coefficients, beta
@@ -147,16 +147,107 @@ fit_mean_lp <- function(y, x, z = NULL, horizons) {
   out
 }
 
-# Local projection impulse response
+# Local projection prediction
 
-lp_response <- function(fitted_lp, delta = 1) {
-  beta <- as.numeric(fitted_lp$beta)
+lp_predict <- function(fitted_lp, x, z = NULL) {
+  
+  coefficients <- fitted_lp$coefficients
+  
+  if (
+    is.null(coefficients) ||
+    is.null(colnames(coefficients)) ||
+    !all(c("alpha", "beta") %in% colnames(coefficients))
+  ) {
+    stop("fitted_lp is not a supported LP object.")
+  }
+  
+  if (length(x) != 1L || !is.finite(x)) {
+    stop("x must be a single finite number.")
+  }
+  
+  x <- as.numeric(x)
+  
+  control_columns <- setdiff(
+    colnames(coefficients),
+    c("alpha", "beta")
+  )
+  
+  if (length(control_columns) == 0L) {
+    
+    if (!is.null(z) && length(z) > 0L) {
+      stop("z must be NULL because the fitted model has no controls.")
+    }
+    
+    z <- numeric(0)
+    
+  } else {
+    
+    if (is.null(z)) {
+      stop(
+        "z must be supplied because the fitted model includes controls."
+      )
+    }
+    
+    z <- as.numeric(z)
+    
+    if (length(z) != length(control_columns)) {
+      stop("z must contain one value for each fitted control.")
+    }
+    
+    if (any(!is.finite(z))) {
+      stop("z must contain only finite values.")
+    }
+  }
+  
+  # z must be supplied in the same order used during estimation
+  design_row <- c(
+    alpha = 1,
+    beta = x,
+    setNames(z, control_columns)
+  )
+  
+  prediction <- as.numeric(
+    coefficients %*%
+      design_row[colnames(coefficients)]
+  )
   
   data.frame(
     horizon = fitted_lp$horizons,
-    beta = beta,
+    x = x,
+    prediction = prediction
+  )
+}
+
+# Local projection dynamic response (as a counterfactual difference)
+
+lp_response <- function(fitted_lp, x, z = NULL, delta = 1) {
+  
+  if (length(delta) != 1L || !is.finite(delta)) {
+    stop("delta must be a single finite number.")
+  }
+  
+  delta <- as.numeric(delta)
+  
+  baseline <- lp_predict(
+    fitted_lp = fitted_lp,
+    x = x,
+    z = z
+  )
+  
+  shocked <- lp_predict(
+    fitted_lp = fitted_lp,
+    x = x + delta,
+    z = z
+  )
+  
+  data.frame(
+    horizon = baseline$horizon,
+    x_baseline = baseline$x,
+    x_shocked = shocked$x,
     delta = delta,
-    response = delta * beta
+    baseline_prediction = baseline$prediction,
+    shocked_prediction = shocked$prediction,
+    response = shocked$prediction - baseline$prediction
   )
 }
 
@@ -233,7 +324,7 @@ fit_median_lp <- function(y, x, z = NULL, horizons) {
   )
 }
 
-# Mean local projection
+# Modal local projection
 
 .modal_objective <- function(theta, y_h, D_h, bandwidth) {
   
