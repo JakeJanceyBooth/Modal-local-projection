@@ -76,78 +76,7 @@ source("0_setup.R")
   )
 }
 
-# Mean Local Projection
-
-fit_mean_lp <- function(y, x, z = NULL, horizons) {
-  
-  horizons <- sort(unique(horizons))
-  
-  if (length(horizons) == 0) {
-    stop("At least one horizon must be supplied.")
-  }
-  
-  fits <- lapply(horizons, function(h) {
-    
-    dat <- .prepare_lp_data(
-      y = y,
-      x = x,
-      z = z,
-      h = h
-    )
-    
-    fit_h <- lm.fit(
-      x = dat$D_h,
-      y = dat$y_h
-    )
-    
-    if (fit_h$rank < ncol(dat$D_h)) {
-      stop(
-        paste0(
-          "Design matrix is rank deficient at horizon h = ",
-          h,
-          "."
-        )
-      )
-    }
-    
-    list(
-      coefficients = setNames(
-        as.numeric(fit_h$coefficients),
-        colnames(dat$D_h)
-      ),
-      n_h = dat$n_h
-    )
-  })
-  
-  # Stack \hat\theta_h across horizons
-  coefficients <- do.call(
-    rbind,
-    lapply(fits, function(fit) fit$coefficients)
-  )
-  
-  rownames(coefficients) <- paste0("h_", horizons)
-  
-  # Extract \hat\beta_h in particular
-  beta <- coefficients[, "beta"]
-  
-  n_h <- vapply(
-    fits,
-    function(fit) fit$n_h,
-    numeric(1)
-  )
-  
-  out <- list(
-    method = "mean_lp",
-    horizons = horizons,
-    n_h = n_h,
-    coefficients = coefficients,
-    beta = beta
-  )
-  
-  out
-}
-
-# Local projection prediction
+# LP prediction and response function. Works for any LP
 
 lp_predict <- function(fitted_lp, x, z = NULL) {
   
@@ -218,8 +147,6 @@ lp_predict <- function(fitted_lp, x, z = NULL) {
   )
 }
 
-# Local projection dynamic response (as a counterfactual difference)
-
 lp_response <- function(fitted_lp, x, z = NULL, delta = 1) {
   
   if (length(delta) != 1L || !is.finite(delta)) {
@@ -249,6 +176,77 @@ lp_response <- function(fitted_lp, x, z = NULL, delta = 1) {
     shocked_prediction = shocked$prediction,
     response = shocked$prediction - baseline$prediction
   )
+}
+
+# Mean Local Projection
+
+fit_mean_lp <- function(y, x, z = NULL, horizons) {
+  
+  horizons <- sort(unique(horizons))
+  
+  if (length(horizons) == 0) {
+    stop("At least one horizon must be supplied.")
+  }
+  
+  fits <- lapply(horizons, function(h) {
+    
+    dat <- .prepare_lp_data(
+      y = y,
+      x = x,
+      z = z,
+      h = h
+    )
+    
+    fit_h <- lm.fit(
+      x = dat$D_h,
+      y = dat$y_h
+    )
+    
+    if (fit_h$rank < ncol(dat$D_h)) {
+      stop(
+        paste0(
+          "Design matrix is rank deficient at horizon h = ",
+          h,
+          "."
+        )
+      )
+    }
+    
+    list(
+      coefficients = setNames(
+        as.numeric(fit_h$coefficients),
+        colnames(dat$D_h)
+      ),
+      n_h = dat$n_h
+    )
+  })
+  
+  # Stack \hat\theta_h across horizons
+  coefficients <- do.call(
+    rbind,
+    lapply(fits, function(fit) fit$coefficients)
+  )
+  
+  rownames(coefficients) <- paste0("h_", horizons)
+  
+  # Extract \hat\beta_h in particular
+  beta <- coefficients[, "beta"]
+  
+  n_h <- vapply(
+    fits,
+    function(fit) fit$n_h,
+    numeric(1)
+  )
+  
+  out <- list(
+    method = "mean_lp",
+    horizons = horizons,
+    n_h = n_h,
+    coefficients = coefficients,
+    beta = beta
+  )
+  
+  out
 }
 
 # Median local projection
@@ -655,3 +653,103 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
   )
 }
 
+# Mean VAR: fit, prediction, and response function (assumes x is an
+# observed shock variable)
+
+fit_var <- function(data, lags, type = "const") {
+  
+  data <- as.matrix(data)
+  
+  if (!is.numeric(data)) {
+    stop("data must contain only numeric variables.")
+  }
+  
+  if (
+    is.null(colnames(data)) || any(colnames(data) == "")
+  ) {
+    stop("Every variable in data must have a name.")
+  }
+  
+  if (any(!is.finite(data))) {
+    stop("Missing and non-finite values are not currently supported.")
+  }
+  
+  if (
+    !is.numeric(lags) ||
+    length(lags) != 1L ||
+    !is.finite(lags) ||
+    lags < 1 ||
+    lags != as.integer(lags)
+  ) {
+    stop("lags must be a positive integer.")
+  }
+  
+  lags <- as.integer(lags)
+  
+  fit <- vars::VAR(
+    y = data,
+    p = lags,
+    type = type
+  )
+  
+  list(
+    method = "var",
+    variables = colnames(data),
+    lags = lags,
+    type = type,
+    n_obs = fit$obs,
+    fit = fit
+  )
+}
+
+var_predict <- function(fitted_var, variable, horizon) {
+  
+  forecasts <- predict(
+    fitted_var$fit,
+    n.ahead = horizon
+  )$fcst[[variable]]
+  
+  data.frame(
+    horizon = seq_len(horizon),
+    variable = variable,
+    prediction = as.numeric(forecasts[, "fcst"])
+  )
+}
+
+var_response <- function(fitted_var, shock, response,
+                         horizon, delta = 1) {
+  
+  phi <- vars::Phi(
+    fitted_var$fit,
+    nstep = horizon
+  )
+  
+  shock_index <- match(
+    shock,
+    fitted_var$variables
+  )
+  
+  response_index <- match(
+    response,
+    fitted_var$variables
+  )
+  
+  if (is.na(shock_index) || is.na(response_index)) {
+    stop("shock and response must match the VAR variable names.")
+  }
+  
+  horizons <- 0:horizon
+  
+  # response, here, gets the coefficients mapping the reduced-form
+  # innovation of size \delta in x at time t to the value of y 
+  # at h = 0, 1, ..., H)
+  
+  data.frame(
+    horizon = horizons,
+    shock = shock,
+    response_variable = response,
+    delta = delta,
+    response = delta *
+      phi[response_index, shock_index, horizons + 1L]
+  )
+}

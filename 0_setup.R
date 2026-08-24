@@ -3,7 +3,6 @@
 
 library(ggplot2)
 library(vars)
-library(ggplot2)
 
 SEED <- 12345
 set.seed(SEED)
