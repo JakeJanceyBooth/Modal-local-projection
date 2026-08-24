@@ -354,7 +354,7 @@ simulate_shape_dgp <- function(T,
     (exp(sdlog^2) - 1) * exp(sdlog^2)
   )
   
-  u <- sigma_y *
+  epsilon_y <- sigma_y *
     (lognormal_draw - lognormal_mode) /
     lognormal_sd
   
@@ -365,7 +365,7 @@ simulate_shape_dgp <- function(T,
     y[t] <- intercept +
       rho * y[t - 1] +
       beta * x[t - 1] +
-      exp(x[t - 1]) * u[t]
+      exp(x[t - 1]) * epsilon_y[t]
   }
   
   # Remove burn-in and align lagged variables
@@ -393,7 +393,9 @@ simulate_shape_dgp <- function(T,
 
 # Population responses under paired counterfactual paths
 
-simulate_shape_response <- function(S, horizon, y_initial,
+simulate_shape_response <- function(S = 2000000, 
+                                    horizon = 20, 
+                                    y_initial = 0,
                                     x_baseline = 0,
                                     delta = 1,
                                     intercept = 0,
@@ -566,3 +568,29 @@ simulate_shape_response <- function(S, horizon, y_initial,
     )
   )
 }
+
+
+# Population mode from a Gaussian KDE
+
+population_mode <- function(x, bw = 1.5 * bw.nrd0(x), n = 8192) {
+  
+  limits <- quantile(
+    x,
+    probs = c(0.001, 0.999),
+    names = FALSE
+  )
+  
+  density_estimate <- density(
+    x,
+    kernel = "gaussian",
+    bw = bw,
+    n = n,
+    from = limits[1],
+    to = limits[2]
+  )
+  
+  density_estimate$x[
+    which.max(density_estimate$y)
+  ]
+}
+
