@@ -25,40 +25,10 @@ dgp_names <- c(
   "skewed",
   "disaster",
   "rich_state",
-  "shock_dependent_scale"
+  "downside_risk"
 )
 
 max_sample_size <- max(sample_sizes)
-
-
-# DGP 5 numerical population response ----
-
-set.seed(24680)
-
-shock_dependent_scale_population <- simulate_shock_dependent_scale_response(
-  S = 2000000,
-  horizon = H,
-  y_initial = 0,
-  x_baseline = 0,
-  delta = 1,
-  mode_function = population_mode
-)
-
-shock_dependent_scale_truth <- 
-  shock_dependent_scale_population$response$mode_response[
-    match(
-      horizons,
-      shock_dependent_scale_population$response$horizon
-    )
-  ]
-
-if (anyNA(shock_dependent_scale_truth)) {
-  stop("DGP 5 population responses are not aligned with the horizons.")
-}
-
-# The path matrices are no longer needed
-rm(shock_dependent_scale_population)
-invisible(gc())
 
 
 # Preallocate raw results ----
@@ -113,25 +83,29 @@ for (replication in seq_len(n_replications)) {
         T = max_sample_size,
         horizon = H
       ),
-      shock_dependent_scale = simulate_shock_dependent_scale_dgp(
-        T = max_sample_size
+      downside_risk = simulate_downside_risk_dgp(
+        T = max_sample_size,
+        horizon = H
       )
     )
     
-    # Select the appropriate population response
-    if (dgp_name == "shock_dependent_scale") {
-      
-      dgp_truth <- shock_dependent_scale_truth
-      
+    # Select the appropriate modal population response
+    truth_column <- if (dgp_name == "downside_risk") {
+      "mode_response"
     } else {
-      
-      dgp_truth <- simulated_dgp$true_response$response[
-        match(
-          horizons,
-          simulated_dgp$true_response$horizon
-        )
-      ]
+      "response"
     }
+    
+    dgp_truth <- simulated_dgp$true_response[
+      [
+        truth_column
+      ]
+    ][
+      match(
+        horizons,
+        simulated_dgp$true_response$horizon
+      )
+    ]
     
     if (anyNA(dgp_truth)) {
       stop(
@@ -164,6 +138,15 @@ for (replication in seq_len(n_replications)) {
         )]
         
         reference_z <- c(0, 0, 0)
+        
+      } else if (dgp_name == "downside_risk") {
+        
+        z <- sample_data$r
+        reference_z <- 0
+        
+        # The true modal function is mildly nonlinear in x.
+        # Here the linear LMP is a deliberate substantive approximation,
+        # not the exactly specified efficiency benchmark supplied by DGP 1.
         
       } else {
         
