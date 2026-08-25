@@ -1,7 +1,6 @@
-# full LMP monte carlo simulations
-# multiple T's, horizons, and all the dgps
-# bias/variance/RMSE of LMP/MIRF estimator for all dgps
-# MRF plots
+# Response-function Monte Carlo
+# Mean LP, Median LP, Modal LP, and VAR
+# Nested samples across sample sizes
 
 source("1_estimators.R")
 source("2_dgps.R")
@@ -28,35 +27,72 @@ dgp_names <- c(
   "downside_risk"
 )
 
+estimator_names <- c(
+  "Mean LP",
+  "Median LP",
+  "Modal LP",
+  "VAR"
+)
+
+cheap_estimators <- c(
+  "Mean LP",
+  "Median LP",
+  "VAR"
+)
+
 max_sample_size <- max(sample_sizes)
 
 
-# Preallocate raw results ----
+# Preallocate Modal LP results ----
 
-n_results <- length(dgp_names) *
+n_modal_results <- length(dgp_names) *
   length(sample_sizes) *
   n_replications *
   length(horizons)
 
-mc_results <- data.frame(
-  dgp = rep(NA_character_, n_results),
-  sample_size = rep(NA_integer_, n_results),
-  replication = rep(NA_integer_, n_results),
-  horizon = rep(NA_integer_, n_results),
-  estimate = rep(NA_real_, n_results),
-  truth = rep(NA_real_, n_results),
-  error = rep(NA_real_, n_results),
-  converged = rep(NA, n_results),
-  iterations = rep(NA_integer_, n_results),
-  selected_start = rep(NA_character_, n_results),
-  n_converged_starts = rep(NA_integer_, n_results),
-  failure = rep(NA_character_, n_results)
+modal_results <- data.frame(
+  dgp = rep(NA_character_, n_modal_results),
+  estimator = rep("Modal LP", n_modal_results),
+  sample_size = rep(NA_integer_, n_modal_results),
+  replication = rep(NA_integer_, n_modal_results),
+  horizon = rep(NA_integer_, n_modal_results),
+  estimate = rep(NA_real_, n_modal_results),
+  truth = rep(NA_real_, n_modal_results),
+  error = rep(NA_real_, n_modal_results),
+  converged = rep(NA, n_modal_results),
+  iterations = rep(NA_integer_, n_modal_results),
+  selected_start = rep(NA_character_, n_modal_results),
+  n_converged_starts = rep(NA_integer_, n_modal_results),
+  failure = rep(NA_character_, n_modal_results)
 )
 
-result_row <- 1
+modal_row <- 1
 
 
-# Baseline Monte Carlo ----
+# Preallocate Mean LP, Median LP, and VAR results ----
+
+n_other_results <- length(dgp_names) *
+  length(sample_sizes) *
+  n_replications *
+  length(horizons) *
+  length(cheap_estimators)
+
+other_results <- data.frame(
+  dgp = rep(NA_character_, n_other_results),
+  estimator = rep(NA_character_, n_other_results),
+  sample_size = rep(NA_integer_, n_other_results),
+  replication = rep(NA_integer_, n_other_results),
+  horizon = rep(NA_integer_, n_other_results),
+  estimate = rep(NA_real_, n_other_results),
+  truth = rep(NA_real_, n_other_results),
+  error = rep(NA_real_, n_other_results),
+  failure = rep(NA_character_, n_other_results)
+)
+
+other_row <- 1
+
+
+# Response Monte Carlo ----
 
 set.seed(12345)
 
@@ -89,21 +125,43 @@ for (replication in seq_len(n_replications)) {
       )
     )
     
-    # Select the appropriate modal population response
-    truth_column <- if (dgp_name == "downside_risk") {
-      "mode_response"
+    truth_index <- match(
+      horizons,
+      simulated_dgp$true_response$horizon
+    )
+    
+    # Population response assigned to each estimator
+    if (dgp_name == "downside_risk") {
+      
+      population_truth <- list(
+        `Mean LP` =
+          simulated_dgp$true_response$
+          mean_response[truth_index],
+        `Median LP` =
+          simulated_dgp$true_response$
+          median_response[truth_index],
+        `Modal LP` =
+          simulated_dgp$true_response$
+          mode_response[truth_index],
+        VAR =
+          simulated_dgp$true_response$
+          mean_response[truth_index]
+      )
+      
     } else {
-      "response"
+      
+      common_truth <- simulated_dgp$true_response$
+        response[truth_index]
+      
+      population_truth <- list(
+        `Mean LP` = common_truth,
+        `Median LP` = common_truth,
+        `Modal LP` = common_truth,
+        VAR = common_truth
+      )
     }
     
-    dgp_truth <- simulated_dgp$true_response[[truth_column]][
-      match(
-        horizons,
-        simulated_dgp$true_response$horizon
-      )
-    ]
-    
-    if (anyNA(dgp_truth)) {
+    if (anyNA(unlist(population_truth))) {
       stop(
         paste(
           "Population responses are not aligned for",
@@ -124,7 +182,9 @@ for (replication in seq_len(n_replications)) {
       y <- sample_data$y
       x <- sample_data$x
       
-      # Correct conditioning vector
+      
+      # LP conditioning vector ----
+      
       if (dgp_name == "rich_state") {
         
         z <- sample_data[, c(
@@ -140,49 +200,163 @@ for (replication in seq_len(n_replications)) {
         z <- sample_data$r
         reference_z <- 0
         
-        # The true modal function is mildly nonlinear in x.
-        # Here the linear LMP is a deliberate substantive approximation,
-        # not the exactly specified efficiency benchmark supplied by DGP 1.
-        
       } else {
         
         z <- sample_data$y
         reference_z <- 0
       }
       
+      
+      # VAR system and lag order ----
+      
+      if (dgp_name == "rich_state") {
+        
+        var_data <- sample_data[, c(
+          "x",
+          "s",
+          "y"
+        )]
+        
+        var_lags <- 2
+        
+      } else if (dgp_name == "downside_risk") {
+        
+        var_data <- sample_data[, c(
+          "x",
+          "r",
+          "y"
+        )]
+        
+        var_lags <- 1
+        
+      } else {
+        
+        var_data <- sample_data[, c(
+          "x",
+          "y"
+        )]
+        
+        var_lags <- 1
+      }
+      
+      
+      # Mean LP: all horizons in one call ----
+      
+      mean_attempt <- tryCatch(
+        {
+          mean_fit <- fit_mean_lp(
+            y = y,
+            x = x,
+            z = z,
+            horizons = horizons
+          )
+          
+          mean_response_fit <- lp_response(
+            fitted_lp = mean_fit,
+            x = 0,
+            z = reference_z,
+            delta = 1
+          )
+          
+          data.frame(
+            horizon = mean_response_fit$horizon,
+            estimate = mean_response_fit$response
+          )
+        },
+        error = function(e) e
+      )
+      
+      
+      # Median LP: all horizons in one call ----
+      
+      median_attempt <- tryCatch(
+        {
+          median_fit <- fit_median_lp(
+            y = y,
+            x = x,
+            z = z,
+            horizons = horizons
+          )
+          
+          median_response_fit <- lp_response(
+            fitted_lp = median_fit,
+            x = 0,
+            z = reference_z,
+            delta = 1
+          )
+          
+          data.frame(
+            horizon = median_response_fit$horizon,
+            estimate = median_response_fit$response
+          )
+        },
+        error = function(e) e
+      )
+      
+      
+      # VAR: one fit and all response horizons ----
+      
+      var_attempt <- tryCatch(
+        {
+          var_fit <- fit_var(
+            data = var_data,
+            lags = var_lags
+          )
+          
+          var_response_fit <- var_response(
+            fitted_var = var_fit,
+            shock = "x",
+            response = "y",
+            horizon = H,
+            delta = 1
+          )
+          
+          data.frame(
+            horizon = var_response_fit$horizon,
+            estimate = var_response_fit$response
+          )
+        },
+        error = function(e) e
+      )
+      
+      
+      # Modal LP: isolate each horizon ----
+      
       for (h_index in seq_along(horizons)) {
         
         h <- horizons[h_index]
-        truth_h <- dgp_truth[h_index]
+        truth_h <- population_truth[["Modal LP"]][h_index]
         
-        attempt <- tryCatch(
+        modal_attempt <- tryCatch(
           {
-            fitted_lp <- fit_modal_lp(
+            modal_fit <- fit_modal_lp(
               y = y,
               x = x,
               z = z,
               horizons = h
             )
             
-            fitted_response <- lp_response(
-              fitted_lp = fitted_lp,
+            modal_response_fit <- lp_response(
+              fitted_lp = modal_fit,
               x = 0,
               z = reference_z,
               delta = 1
             )
             
             list(
-              fit = fitted_lp,
-              estimate = fitted_response$response[1]
+              fit = modal_fit,
+              estimate =
+                modal_response_fit$response[1]
             )
           },
           error = function(e) e
         )
         
-        if (inherits(attempt, "error")) {
+        if (inherits(modal_attempt, "error")) {
           
-          mc_results[result_row, ] <- list(
+          modal_results[modal_row, ] <- list(
             dgp_name,
+            "Modal LP",
             sample_size,
             replication,
             h,
@@ -193,31 +367,135 @@ for (replication in seq_len(n_replications)) {
             NA_integer_,
             NA_character_,
             NA_integer_,
-            conditionMessage(attempt)
+            conditionMessage(modal_attempt)
           )
           
         } else {
           
-          estimate_h <- attempt$estimate
+          estimate_h <- modal_attempt$estimate
           error_h <- estimate_h - truth_h
           
-          mc_results[result_row, ] <- list(
+          modal_results[modal_row, ] <- list(
             dgp_name,
+            "Modal LP",
             sample_size,
             replication,
             h,
             estimate_h,
             truth_h,
             error_h,
-            attempt$fit$converged[1],
-            attempt$fit$iterations[1],
-            attempt$fit$selected_start[1],
-            attempt$fit$n_converged_starts[1],
+            modal_attempt$fit$converged[1],
+            modal_attempt$fit$iterations[1],
+            modal_attempt$fit$selected_start[1],
+            modal_attempt$fit$
+              n_converged_starts[1],
             NA_character_
           )
         }
         
-        result_row <- result_row + 1
+        modal_row <- modal_row + 1
+      }
+      
+      
+      # Store Mean LP, Median LP, and VAR results ----
+      
+      cheap_attempts <- list(
+        `Mean LP` = mean_attempt,
+        `Median LP` = median_attempt,
+        VAR = var_attempt
+      )
+      
+      for (estimator in cheap_estimators) {
+        
+        estimator_attempt <-
+          cheap_attempts[[estimator]]
+        
+        estimator_truth <-
+          population_truth[[estimator]]
+        
+        rows <- other_row:(
+          other_row + length(horizons) - 1
+        )
+        
+        if (inherits(estimator_attempt, "error")) {
+          
+          other_results[rows, ] <- data.frame(
+            dgp = rep(
+              dgp_name,
+              length(horizons)
+            ),
+            estimator = rep(
+              estimator,
+              length(horizons)
+            ),
+            sample_size = rep(
+              sample_size,
+              length(horizons)
+            ),
+            replication = rep(
+              replication,
+              length(horizons)
+            ),
+            horizon = horizons,
+            estimate = rep(
+              NA_real_,
+              length(horizons)
+            ),
+            truth = estimator_truth,
+            error = rep(
+              NA_real_,
+              length(horizons)
+            ),
+            failure = rep(
+              conditionMessage(estimator_attempt),
+              length(horizons)
+            )
+          )
+          
+        } else {
+          
+          estimator_estimate <-
+            estimator_attempt$estimate[
+              match(
+                horizons,
+                estimator_attempt$horizon
+              )
+            ]
+          
+          estimator_error <-
+            estimator_estimate -
+            estimator_truth
+          
+          other_results[rows, ] <- data.frame(
+            dgp = rep(
+              dgp_name,
+              length(horizons)
+            ),
+            estimator = rep(
+              estimator,
+              length(horizons)
+            ),
+            sample_size = rep(
+              sample_size,
+              length(horizons)
+            ),
+            replication = rep(
+              replication,
+              length(horizons)
+            ),
+            horizon = horizons,
+            estimate = estimator_estimate,
+            truth = estimator_truth,
+            error = estimator_error,
+            failure = rep(
+              NA_character_,
+              length(horizons)
+            )
+          )
+        }
+        
+        other_row <-
+          other_row + length(horizons)
       }
     }
   }
@@ -233,77 +511,120 @@ for (replication in seq_len(n_replications)) {
 }
 
 
-# Monte Carlo summary ----
+# Monte Carlo summaries ----
 
-result_groups <- split(
-  mc_results,
-  interaction(
-    mc_results$dgp,
-    mc_results$sample_size,
-    mc_results$horizon,
-    drop = TRUE
-  )
+raw_result_tables <- list(
+  modal = modal_results,
+  other = other_results
 )
 
-mc_summary <- do.call(
-  rbind,
-  lapply(
-    result_groups,
-    function(group) {
-      
-      successful <- group$converged &
-        is.finite(group$estimate)
-      
-      n_success <- sum(successful)
-      
-      data.frame(
-        dgp = group$dgp[1],
-        sample_size = group$sample_size[1],
-        horizon = group$horizon[1],
-        bias = if (n_success > 0) {
-          mean(group$error[successful])
-        } else {
-          NA_real_
-        },
-        variance = if (n_success > 1) {
-          var(group$estimate[successful])
-        } else {
-          NA_real_
-        },
-        rmse = if (n_success > 0) {
-          sqrt(mean(
-            group$error[successful]^2
-          ))
-        } else {
-          NA_real_
-        },
-        n_replications = nrow(group),
-        n_success = n_success,
-        success_rate = n_success / nrow(group)
-      )
-    }
-  )
+summary_tables <- vector(
+  "list",
+  length(raw_result_tables)
 )
 
-rownames(mc_summary) <- NULL
+names(summary_tables) <- names(raw_result_tables)
 
-mc_summary <- mc_summary[
-  order(
-    match(mc_summary$dgp, dgp_names),
-    mc_summary$sample_size,
-    mc_summary$horizon
-  ),
-]
+for (table_name in names(raw_result_tables)) {
+  
+  results <- raw_result_tables[[table_name]]
+  
+  result_groups <- split(
+    results,
+    interaction(
+      results$dgp,
+      results$estimator,
+      results$sample_size,
+      results$horizon,
+      drop = TRUE
+    )
+  )
+  
+  summary_tables[[table_name]] <- do.call(
+    rbind,
+    lapply(
+      result_groups,
+      function(group) {
+        
+        successful <- is.na(group$failure) &
+          is.finite(group$estimate)
+        
+        n_success <- sum(successful)
+        
+        data.frame(
+          dgp = group$dgp[1],
+          estimator = group$estimator[1],
+          sample_size = group$sample_size[1],
+          horizon = group$horizon[1],
+          bias = if (n_success > 0) {
+            mean(group$error[successful])
+          } else {
+            NA_real_
+          },
+          variance = if (n_success > 1) {
+            var(group$estimate[successful])
+          } else {
+            NA_real_
+          },
+          rmse = if (n_success > 0) {
+            sqrt(mean(
+              group$error[successful]^2
+            ))
+          } else {
+            NA_real_
+          },
+          n_replications = nrow(group),
+          n_success = n_success,
+          success_rate =
+            n_success / nrow(group)
+        )
+      }
+    )
+  )
+  
+  rownames(
+    summary_tables[[table_name]]
+  ) <- NULL
+}
+
+modal_summary <- summary_tables$modal
+other_summary <- summary_tables$other
+
+response_comparison_summary <- rbind(
+  modal_summary,
+  other_summary
+)
+
+rownames(response_comparison_summary) <- NULL
+
+response_comparison_summary <-
+  response_comparison_summary[
+    order(
+      match(
+        response_comparison_summary$dgp,
+        dgp_names
+      ),
+      match(
+        response_comparison_summary$estimator,
+        estimator_names
+      ),
+      response_comparison_summary$sample_size,
+      response_comparison_summary$horizon
+    ),
+  ]
+
 
 # Inspect results ----
 
-head(mc_results)
-head(mc_summary)
+head(modal_results)
+head(other_results)
+head(response_comparison_summary)
 
-mc_summary[
-  mc_summary$success_rate < 1,
+response_comparison_summary[
+  response_comparison_summary$success_rate < 1,
   c(
     "dgp",
+    "estimator",
     "sample_size",
     "horizon",
     "n_success",
