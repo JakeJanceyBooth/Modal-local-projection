@@ -17,7 +17,7 @@ sample_sizes <- c(
 H <- 20
 horizons <- seq_len(H)
 
-n_replications <- 100
+n_replications <- 1000
 
 dgp_names <- c(
   "gaussian",

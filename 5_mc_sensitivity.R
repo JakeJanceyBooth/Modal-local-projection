@@ -33,11 +33,12 @@ horizons <- c(
 )
 
 bw_constants <- c(
-  0.8,
-  1.2,
   1.6,
   2.0,
-  2.4
+  2.4,
+  3.0,
+  3.6,
+  4.2
 )
 
 baseline_bw_constant <- 1.6
@@ -53,7 +54,7 @@ start_schemes <- list(
   )
 )
 
-n_replications <- 5
+n_replications <- 100
 
 max_sample_size <- max(sample_sizes)
 H <- max(horizons)
@@ -88,7 +89,13 @@ fit_modal_once <- function(y, x, z, horizon,
       
       list(
         fit = modal_fit,
-        estimate = modal_response$response[1]
+        estimate = modal_response$response[1],
+        start_diagnostics =
+          if (return_start_diagnostics) {
+            modal_fit$start_diagnostics[[1]]
+          } else {
+            NULL
+          }
       )
     },
     error = function(e) e
@@ -149,6 +156,10 @@ start_sensitivity_raw <- data.frame(
   iterations = rep(NA_integer_, n_start_results),
   selected_start = rep(NA_character_, n_start_results),
   n_converged_starts = rep(NA_integer_, n_start_results),
+  start_diagnostics = I(
+    vector("list", n_start_results)
+  ),
+  failure = rep(NA_character_, n_start_results),
   failure = rep(NA_character_, n_start_results)
 )
 
@@ -342,6 +353,7 @@ for (replication in seq_len(n_replications)) {
               NA_integer_,
               NA_character_,
               NA_integer_,
+              list(NULL),
               conditionMessage(start_attempt)
             )
             
@@ -368,7 +380,7 @@ for (replication in seq_len(n_replications)) {
               fit$iterations[1],
               fit$selected_start[1],
               fit$n_converged_starts[1],
-              fit$start_diagnostics[[1]],
+              list(start_attempt$start_diagnostics),
               NA_character_
             )
           }
@@ -391,6 +403,7 @@ for (replication in seq_len(n_replications)) {
     )
   }
 }
+
 
 
 # bandwidth-sensitivity summary ----
@@ -511,101 +524,93 @@ pair_keys <- c(
   "horizon"
 )
 
-two_start_results <- start_sensitivity_raw[
-  start_sensitivity_raw$start_scheme ==
-    "two_starts",
-  c(
-    pair_keys,
-    "estimate",
-    "objective",
-    "converged",
-    "failure"
-  ),
-  drop = FALSE
-]
-
-names(two_start_results)[
-  names(two_start_results) == "estimate"
-] <- "estimate_two"
-
-names(two_start_results)[
-  names(two_start_results) == "objective"
-] <- "objective_two"
-
-names(two_start_results)[
-  names(two_start_results) == "converged"
-] <- "converged_two"
-
-names(two_start_results)[
-  names(two_start_results) == "failure"
-] <- "failure_two"
+objective_tolerance <- 1e-8
+coefficient_tolerance <- 1e-6
 
 
-six_start_results <- start_sensitivity_raw[
-  start_sensitivity_raw$start_scheme ==
-    "six_starts",
-  c(
-    pair_keys,
-    "estimate",
-    "objective",
-    "converged",
-    "selected_start",
-    "failure"
-  ),
-  drop = FALSE
-]
+# Extract two-start results ----
 
-names(six_start_results)[
-  names(six_start_results) == "estimate"
-] <- "estimate_six"
-
-names(six_start_results)[
-  names(six_start_results) == "objective"
-] <- "objective_six"
-
-names(six_start_results)[
-  names(six_start_results) == "converged"
-] <- "converged_six"
-
-names(six_start_results)[
-  names(six_start_results) == "selected_start"
-] <- "selected_start_six"
-
-names(six_start_results)[
-  names(six_start_results) == "failure"
-] <- "failure_six"
+two_start_results <-
+  start_sensitivity_raw |>
+  dplyr::filter(
+    start_scheme == "two_starts"
+  ) |>
+  dplyr::select(
+    dplyr::all_of(pair_keys),
+    estimate,
+    objective,
+    converged,
+    failure
+  ) |>
+  dplyr::rename(
+    estimate_two = estimate,
+    objective_two = objective,
+    converged_two = converged,
+    failure_two = failure
+  )
 
 
-start_pair_comparison <- merge(
-  two_start_results,
-  six_start_results,
-  by = pair_keys,
-  all = TRUE
-)
+# Extract six-start results ----
 
-start_pair_comparison$paired_success <-
-  is.na(start_pair_comparison$failure_two) &
-  is.na(start_pair_comparison$failure_six) &
-  start_pair_comparison$converged_two %in% TRUE &
-  start_pair_comparison$converged_six %in% TRUE &
-  is.finite(start_pair_comparison$estimate_two) &
-  is.finite(start_pair_comparison$estimate_six)
+six_start_results <-
+  start_sensitivity_raw |>
+  dplyr::filter(
+    start_scheme == "six_starts"
+  ) |>
+  dplyr::select(
+    dplyr::all_of(pair_keys),
+    estimate,
+    objective,
+    converged,
+    selected_start,
+    start_diagnostics,
+    failure
+  ) |>
+  dplyr::rename(
+    estimate_six = estimate,
+    objective_six = objective,
+    converged_six = converged,
+    selected_start_six = selected_start,
+    failure_six = failure
+  )
 
-start_pair_comparison$estimate_difference <-
-  start_pair_comparison$estimate_six -
-  start_pair_comparison$estimate_two
 
-start_pair_comparison$objective_gain <-
-  start_pair_comparison$objective_six -
-  start_pair_comparison$objective_two
+# Two-start versus six-start comparison ----
 
-start_pair_comparison$new_quantile_selected <-
-  start_pair_comparison$selected_start_six %in%
-  c(
-    "q10",
-    "q25",
-    "q75",
-    "q90"
+start_pair_comparison <-
+  dplyr::full_join(
+    two_start_results,
+    six_start_results |>
+      dplyr::select(
+        -start_diagnostics
+      ),
+    by = pair_keys
+  ) |>
+  dplyr::mutate(
+    paired_success =
+      is.na(failure_two) &
+      is.na(failure_six) &
+      converged_two %in% TRUE &
+      converged_six %in% TRUE &
+      is.finite(estimate_two) &
+      is.finite(estimate_six),
+    
+    estimate_difference =
+      estimate_six -
+      estimate_two,
+    
+    objective_gain =
+      objective_six -
+      objective_two,
+    
+    new_quantile_selected =
+      selected_start_six %in%
+      c(
+        "q10",
+        "q25",
+        "q75",
+        "q90"
+      )
   )
 
 
@@ -619,41 +624,69 @@ start_pair_summary <-
   dplyr::summarise(
     n_paired_success =
       sum(paired_success),
+    
     mean_absolute_estimate_difference =
       if (any(paired_success)) {
-        mean(abs(
-          estimate_difference[paired_success]
-        ))
+        mean(
+          abs(
+            estimate_difference[
+              paired_success
+            ]
+          )
+        )
       } else {
         NA_real_
       },
+    
     material_estimate_difference_rate =
       if (any(paired_success)) {
         mean(
           abs(
-            estimate_difference[paired_success]
-          ) > 1e-6
+            estimate_difference[
+              paired_success
+            ]
+          ) >
+            coefficient_tolerance
         )
       } else {
         NA_real_
       },
+    
     mean_objective_gain =
       if (any(paired_success)) {
         mean(
-          objective_gain[paired_success]
+          objective_gain[
+            paired_success
+          ]
         )
       } else {
         NA_real_
       },
+    
     higher_objective_rate =
       if (any(paired_success)) {
         mean(
-          objective_gain[paired_success] >
-            1e-10
+          objective_gain[
+            paired_success
+          ] >
+            objective_tolerance
         )
       } else {
         NA_real_
       },
+    
+    negative_objective_gain_rate =
+      if (any(paired_success)) {
+        mean(
+          objective_gain[
+            paired_success
+          ] <
+            -objective_tolerance
+        )
+      } else {
+        NA_real_
+      },
+    
     new_quantile_selection_rate =
       if (any(paired_success)) {
         mean(
@@ -664,34 +697,246 @@ start_pair_summary <-
       } else {
         NA_real_
       },
+    
     new_solution_rate =
       if (any(paired_success)) {
         mean(
           new_quantile_selected[
             paired_success
           ] &
-            objective_gain[paired_success] >
-            1e-10
+            objective_gain[
+              paired_success
+            ] >
+            objective_tolerance
         )
       } else {
         NA_real_
       },
+    
     .groups = "drop"
   )
 
 
-# Pairwise columns on the six-start row compare it with two starts
-start_sensitivity_summary <- merge(
-  start_scheme_summary,
-  start_pair_summary,
-  by = c(
-    "dgp",
-    "sample_size",
-    "horizon"
+# Individual-start diagnostics from six-start fits ----
+
+diagnostic_rows <- lapply(
+  seq_len(
+    nrow(six_start_results)
   ),
-  all.x = TRUE,
-  sort = FALSE
+  function(i) {
+    
+    diagnostics_i <-
+      six_start_results$
+      start_diagnostics[[i]]
+    
+    # Handle an accidentally nested list-column
+    if (
+      is.list(diagnostics_i) &&
+      !is.data.frame(diagnostics_i) &&
+      length(diagnostics_i) == 1
+    ) {
+      diagnostics_i <-
+        diagnostics_i[[1]]
+    }
+    
+    if (
+      is.null(diagnostics_i) ||
+      !is.data.frame(diagnostics_i) ||
+      nrow(diagnostics_i) == 0
+    ) {
+      return(NULL)
+    }
+    
+    successful_starts <-
+      diagnostics_i$converged %in% TRUE &
+      is.finite(
+        diagnostics_i$objective
+      )
+    
+    if (!any(successful_starts)) {
+      return(NULL)
+    }
+    
+    best_objective <- max(
+      diagnostics_i$objective[
+        successful_starts
+      ]
+    )
+    
+    diagnostics_i$
+      objective_gap_from_best <-
+      best_objective -
+      diagnostics_i$objective
+    
+    diagnostics_i$tied_best <-
+      successful_starts &
+      diagnostics_i$
+      objective_gap_from_best <=
+      objective_tolerance
+    
+    diagnostics_i$unique_best <-
+      diagnostics_i$tied_best &
+      sum(
+        diagnostics_i$tied_best
+      ) == 1
+    
+    diagnostics_i$selected <-
+      diagnostics_i$start ==
+      six_start_results$
+      selected_start_six[i]
+    
+    selected_index <- match(
+      six_start_results$
+        selected_start_six[i],
+      diagnostics_i$start
+    )
+    
+    selected_coefficients <-
+      diagnostics_i$
+      coefficients[[selected_index]]
+    
+    diagnostics_i$
+      coefficient_distance_from_selected <-
+      vapply(
+        diagnostics_i$coefficients,
+        function(theta) {
+          
+          sqrt(
+            sum(
+              (
+                theta -
+                  selected_coefficients
+              )^2
+            )
+          )
+        },
+        numeric(1)
+      )
+    
+    diagnostics_i$dgp <-
+      six_start_results$dgp[i]
+    
+    diagnostics_i$sample_size <-
+      six_start_results$
+      sample_size[i]
+    
+    diagnostics_i$replication <-
+      six_start_results$
+      replication[i]
+    
+    diagnostics_i$horizon <-
+      six_start_results$
+      horizon[i]
+    
+    diagnostics_i
+  }
 )
+
+
+start_diagnostics_long <-
+  dplyr::bind_rows(
+    diagnostic_rows
+  )
+
+# Summary by individual starting value ----
+
+start_diagnostics_summary <-
+  start_diagnostics_long |>
+  dplyr::group_by(
+    dgp,
+    sample_size,
+    horizon,
+    start
+  ) |>
+  dplyr::summarise(
+    n_runs =
+      dplyr::n(),
+    
+    convergence_rate =
+      mean(
+        converged %in% TRUE
+      ),
+    
+    selection_rate =
+      mean(
+        selected %in% TRUE
+      ),
+    
+    tied_best_rate =
+      mean(
+        tied_best %in% TRUE
+      ),
+    
+    unique_best_rate =
+      mean(
+        unique_best %in% TRUE
+      ),
+    
+    mean_objective_gap =
+      if (
+        any(
+          converged %in% TRUE
+        )
+      ) {
+        mean(
+          objective_gap_from_best[
+            converged %in% TRUE
+          ],
+          na.rm = TRUE
+        )
+      } else {
+        NA_real_
+      },
+    
+    mean_coefficient_distance =
+      if (
+        any(
+          converged %in% TRUE
+        )
+      ) {
+        mean(
+          coefficient_distance_from_selected[
+            converged %in% TRUE
+          ],
+          na.rm = TRUE
+        )
+      } else {
+        NA_real_
+      },
+    
+    mean_iterations =
+      if (
+        any(
+          converged %in% TRUE
+        )
+      ) {
+        mean(
+          iterations[
+            converged %in% TRUE
+          ],
+          na.rm = TRUE
+        )
+      } else {
+        NA_real_
+      },
+    
+    .groups = "drop"
+  )
+
+
+
+# Add paired diagnostics to scheme-level summary ----
+
+start_sensitivity_summary <-
+  dplyr::left_join(
+    start_scheme_summary,
+    start_pair_summary,
+    by = c(
+      "dgp",
+      "sample_size",
+      "horizon"
+    )
+  )
 
 paired_columns <- setdiff(
   names(start_pair_summary),
@@ -703,8 +948,8 @@ paired_columns <- setdiff(
 )
 
 start_sensitivity_summary[
-  start_sensitivity_summary$start_scheme ==
-    "two_starts",
+  start_sensitivity_summary$
+    start_scheme == "two_starts",
   paired_columns
 ] <- NA
 
@@ -715,18 +960,21 @@ start_sensitivity_summary <-
         start_sensitivity_summary$dgp,
         dgp_names
       ),
-      start_sensitivity_summary$sample_size,
-      start_sensitivity_summary$horizon,
+      start_sensitivity_summary$
+        sample_size,
+      start_sensitivity_summary$
+        horizon,
       match(
-        start_sensitivity_summary$start_scheme,
+        start_sensitivity_summary$
+          start_scheme,
         names(start_schemes)
       )
     ),
   ]
 
-rownames(start_sensitivity_summary) <- NULL
-
-
+rownames(
+  start_sensitivity_summary
+) <- NULL
 # bandwidth diagnostic plots ----
 
 plot_rmse <- ggplot(
@@ -854,14 +1102,254 @@ plot_success_rate <- ggplot(
     legend.position = "bottom"
   )
 
+bandwidth_sensitivity_summary <-
+  bandwidth_sensitivity_summary |>
+  dplyr::mutate(
+    absolute_bias = abs(bias),
+    squared_bias = bias^2
+  )
+
+plot_absolute_bias <- ggplot(
+  bandwidth_sensitivity_summary,
+  aes(
+    x = bw_constant,
+    y = absolute_bias,
+    colour = factor(sample_size),
+    group = factor(sample_size)
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    dgp ~ horizon,
+    scales = "free_y",
+    labeller = label_both
+  ) +
+  scale_x_continuous(
+    breaks = bw_constants
+  ) +
+  labs(
+    x = "Bandwidth constant",
+    y = "Absolute bias",
+    colour = "Sample size"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+# Modal-response paths across bandwidths ----
+
+bandwidth_response_data <-
+  bandwidth_sensitivity_raw |>
+  dplyr::mutate(
+    success =
+      is.na(failure) &
+      converged %in% TRUE &
+      is.finite(estimate)
+  ) |>
+  dplyr::filter(
+    dgp == "downside_risk",
+    success
+  ) |>
+  dplyr::group_by(
+    sample_size,
+    horizon,
+    bw_constant
+  ) |>
+  dplyr::summarise(
+    average_estimate =
+      mean(estimate),
+    truth =
+      dplyr::first(truth),
+    .groups = "drop"
+  )
+
+bandwidth_truth <-
+  bandwidth_response_data |>
+  dplyr::distinct(
+    sample_size,
+    horizon,
+    truth
+  )
+
+plot_bandwidth_response <- ggplot(
+  bandwidth_response_data,
+  aes(
+    x = horizon,
+    y = average_estimate,
+    colour = factor(bw_constant),
+    group = factor(bw_constant)
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(
+    linewidth = 0.9
+  ) +
+  geom_point(
+    size = 1.8
+  ) +
+  geom_line(
+    data = bandwidth_truth,
+    aes(
+      x = horizon,
+      y = truth
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.9
+  ) +
+  geom_point(
+    data = bandwidth_truth,
+    aes(
+      x = horizon,
+      y = truth
+    ),
+    inherit.aes = FALSE,
+    size = 1.8
+  ) +
+  facet_wrap(
+    ~ sample_size,
+    nrow = 1
+  ) +
+  scale_x_continuous(
+    breaks = horizons
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Modal response",
+    colour = "Bandwidth constant"
+  ) +
+  theme_minimal()
+
+# two-start versus six-start diagnostic plot ----
+
+start_pair_plot_data <-
+  start_pair_summary |>
+  dplyr::select(
+    dgp,
+    sample_size,
+    horizon,
+    higher_objective_rate,
+    material_estimate_difference_rate,
+    new_solution_rate
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(
+      higher_objective_rate,
+      material_estimate_difference_rate,
+      new_solution_rate
+    ),
+    names_to = "diagnostic",
+    values_to = "rate"
+  )
+
+plot_start_pair <- ggplot(
+  start_pair_plot_data,
+  aes(
+    x = horizon,
+    y = rate,
+    colour = factor(sample_size),
+    group = factor(sample_size)
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    dgp ~ diagnostic,
+    labeller = label_both
+  ) +
+  coord_cartesian(
+    ylim = c(0, 1)
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Rate",
+    colour = "Sample size"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+start_diagnostics_summary <-
+  start_diagnostics_summary |>
+  dplyr::mutate(
+    start = factor(
+      start,
+      levels = c(
+        "ols",
+        "q10",
+        "q25",
+        "median",
+        "q75",
+        "q90"
+      )
+    )
+  )
+
+start_selection_plot_data <-
+  start_diagnostics_summary |>
+  dplyr::select(
+    dgp,
+    sample_size,
+    horizon,
+    start,
+    selection_rate,
+    tied_best_rate
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(
+      selection_rate,
+      tied_best_rate
+    ),
+    names_to = "diagnostic",
+    values_to = "rate"
+  )
+
+plot_start_selection <- ggplot(
+  start_selection_plot_data,
+  aes(
+    x = start,
+    y = rate,
+    colour = diagnostic,
+    group = diagnostic
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    dgp + sample_size ~ horizon,
+    labeller = label_both
+  ) +
+  coord_cartesian(
+    ylim = c(0, 1)
+  ) +
+  labs(
+    x = "Starting value",
+    y = "Rate",
+    colour = "Diagnostic"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
 
 sensitivity_plots <- list(
   rmse = plot_rmse,
   variance = plot_variance,
   bias = plot_bias,
-  success_rate = plot_success_rate
+  absolute_bias = plot_absolute_bias,
+  success_rate = plot_success_rate,
+  start_pair = plot_start_pair,
+  start_selection = plot_start_selection
 )
-
 
 # save results ----
 
@@ -872,7 +1360,8 @@ dir.create(
 
 run_label <- paste0(
   "R",
-  n_replications
+  n_replications,
+  "_bw_extended"
 )
 
 saveRDS(
@@ -924,6 +1413,30 @@ saveRDS(
 )
 
 saveRDS(
+  start_diagnostics_long,
+  file.path(
+    "results",
+    paste0(
+      "start_diagnostics_long_",
+      run_label,
+      ".rds"
+    )
+  )
+)
+
+saveRDS(
+  start_diagnostics_summary,
+  file.path(
+    "results",
+    paste0(
+      "start_diagnostics_summary_",
+      run_label,
+      ".rds"
+    )
+  )
+)
+
+saveRDS(
   sensitivity_plots,
   file.path(
     "results",
@@ -934,3 +1447,4 @@ saveRDS(
     )
   )
 )
+
