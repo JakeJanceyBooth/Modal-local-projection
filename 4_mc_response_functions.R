@@ -43,7 +43,7 @@ cheap_estimators <- c(
 max_sample_size <- max(sample_sizes)
 
 
-# Preallocate Modal LP results ----
+# preallocate Modal LP results ----
 
 n_modal_results <- length(dgp_names) *
   length(sample_sizes) *
@@ -69,7 +69,7 @@ modal_results <- data.frame(
 modal_row <- 1
 
 
-# Preallocate Mean LP, Median LP, and VAR results ----
+# preallocate Mean LP, Median LP, and VAR results ----
 
 n_other_results <- length(dgp_names) *
   length(sample_sizes) *
@@ -92,7 +92,7 @@ other_results <- data.frame(
 other_row <- 1
 
 
-# Response Monte Carlo ----
+# response Monte Carlo ----
 
 set.seed(12345)
 
@@ -614,7 +614,7 @@ response_comparison_summary <-
   ]
 
 
-# Inspect results ----
+# inspect results ----
 
 head(modal_results)
 head(other_results)
@@ -631,3 +631,380 @@ response_comparison_summary[
     "success_rate"
   )
 ]
+
+# Save output
+
+saveRDS(response_comparison_summary, "response_comparison_summary.rds")
+
+saveRDS(modal_results, "modal_response_results.rds")
+
+saveRDS(other_results, "other_response_results.rds")
+
+dir.create(
+  "results",
+  showWarnings = FALSE
+)
+
+
+# extract opulation truths ----
+
+response_truth <- bind_rows(
+  modal_results |>
+    select(
+      dgp,
+      estimator,
+      horizon,
+      truth
+    ),
+  other_results |>
+    select(
+      dgp,
+      estimator,
+      horizon,
+      truth
+    )
+) |>
+  distinct()
+
+
+# data for plotting ----
+
+response_plot_data <-
+  response_comparison_summary |>
+  left_join(
+    response_truth,
+    by = c(
+      "dgp",
+      "estimator",
+      "horizon"
+    )
+  ) |>
+  mutate(
+    estimator = factor(
+      estimator,
+      levels = c(
+        "Mean LP",
+        "Median LP",
+        "Modal LP",
+        "VAR"
+      )
+    ),
+    average_estimate = truth + bias,
+    mcse = sqrt(
+      variance / n_success
+    ),
+    mc_lower =
+      average_estimate - 1.96 * mcse,
+    mc_upper =
+      average_estimate + 1.96 * mcse
+  )
+
+
+# plot 1. RMSE overview ----
+
+plot_rmse <- ggplot(
+  response_plot_data,
+  aes(
+    horizon,
+    rmse,
+    colour = estimator,
+    linetype = estimator
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  facet_grid(
+    dgp ~ sample_size,
+    scales = "free_y"
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  labs(
+    x = "Horizon",
+    y = "RMSE",
+    colour = "Estimator",
+    linetype = "Estimator"
+  ) +
+  theme_minimal()
+
+
+# plot 2. bias overview ----
+
+plot_bias <- ggplot(
+  response_plot_data,
+  aes(
+    horizon,
+    bias,
+    colour = estimator,
+    linetype = estimator
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(linewidth = 0.8) +
+  facet_grid(
+    dgp ~ sample_size,
+    scales = "free_y"
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Bias",
+    colour = "Estimator",
+    linetype = "Estimator"
+  ) +
+  theme_minimal()
+
+
+# plot 3. DGP 5 response separation ----
+
+downside_plot_data <-
+  response_plot_data |>
+  filter(
+    dgp == "downside_risk",
+    estimator != "VAR"
+  ) |>
+  select(
+    estimator,
+    sample_size,
+    horizon,
+    truth,
+    average_estimate
+  ) |>
+  pivot_longer(
+    c(
+      truth,
+      average_estimate
+    ),
+    names_to = "series",
+    values_to = "response"
+  )
+
+plot_downside <- ggplot(
+  downside_plot_data,
+  aes(
+    horizon,
+    response,
+    colour = estimator,
+    linetype = series
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(linewidth = 0.9) +
+  facet_wrap(
+    ~ sample_size,
+    nrow = 1
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  scale_linetype_manual(
+    values = c(
+      truth = "dashed",
+      average_estimate = "solid"
+    ),
+    labels = c(
+      truth = "Population truth",
+      average_estimate =
+        "Monte Carlo average"
+    )
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Response",
+    colour = "Estimator",
+    linetype = NULL
+  ) +
+  theme_minimal()
+
+
+# plot 4. Gaussian common-target responses ----
+
+gaussian_plot_data <-
+  response_plot_data |>
+  filter(
+    dgp == "gaussian"
+  )
+
+plot_gaussian <- ggplot(
+  gaussian_plot_data,
+  aes(
+    horizon,
+    average_estimate,
+    colour = estimator
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(linewidth = 0.9) +
+  geom_line(
+    data = gaussian_plot_data |>
+      filter(
+        estimator == "Mean LP"
+      ),
+    aes(
+      y = truth
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.9
+  ) +
+  facet_wrap(
+    ~ sample_size,
+    nrow = 1
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Response",
+    colour = "Estimator"
+  ) +
+  theme_minimal()
+
+
+# plot 5. DGP 5 modal LP Monte Carlo uncertainty ----
+
+plot_downside_modal_mcse <- ggplot(
+  response_plot_data |>
+    filter(
+      dgp == "downside_risk",
+      estimator == "Modal LP"
+    ),
+  aes(
+    horizon,
+    average_estimate
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_ribbon(
+    aes(
+      ymin = mc_lower,
+      ymax = mc_upper
+    ),
+    alpha = 0.2
+  ) +
+  geom_line(
+    aes(
+      y = truth
+    ),
+    linetype = "dashed",
+    linewidth = 0.9
+  ) +
+  geom_line(
+    linewidth = 0.9
+  ) +
+  facet_wrap(
+    ~ sample_size,
+    nrow = 1
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Modal response"
+  ) +
+  theme_minimal()
+
+
+# store plots together in list ----
+
+response_plots <- list(
+  rmse = plot_rmse,
+  bias = plot_bias,
+  downside_response = plot_downside,
+  gaussian_response = plot_gaussian,
+  downside_modal_mcse =
+    plot_downside_modal_mcse
+)
+
+
+# save everything .RDS----
+
+run_label <- paste0(
+  "R",
+  n_replications
+)
+
+saveRDS(
+  modal_results,
+  file.path(
+    "results",
+    paste0(
+      "modal_results_",
+      run_label,
+      ".rds"
+    )
+  )
+)
+
+saveRDS(
+  other_results,
+  file.path(
+    "results",
+    paste0(
+      "other_results_",
+      run_label,
+      ".rds"
+    )
+  )
+)
+
+saveRDS(
+  response_comparison_summary,
+  file.path(
+    "results",
+    paste0(
+      "response_summary_",
+      run_label,
+      ".rds"
+    )
+  )
+)
+
+saveRDS(
+  response_truth,
+  file.path(
+    "results",
+    paste0(
+      "response_truth_",
+      run_label,
+      ".rds"
+    )
+  )
+)
+
+saveRDS(
+  response_plot_data,
+  file.path(
+    "results",
+    paste0(
+      "response_plot_data_",
+      run_label,
+      ".rds"
+    )
+  )
+)
+
+saveRDS(
+  response_plots,
+  file.path(
+    "results",
+    paste0(
+      "response_plots_",
+      run_label,
+      ".rds"
+    )
+  )
+)
