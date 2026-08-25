@@ -2,7 +2,7 @@
 # symmetric DGP (Gaussian)
 # skewed/assymetric DGP (lognormal)
 # rare-disaster-type DGP (Gaussian mixture)
-# misspecification ()
+# richer dynamic state and shock-dependent downside risk
 # functions that give the true mean/mode/median/IRF/MIRF if known
 
 # Gaussian common-target benchmark
@@ -327,222 +327,174 @@ simulate_rich_state_dgp <- function(T, horizon,
   )
 }
 
-# Shock-dependent distributional shock_dependent_scale
+# Shock-dependent downside-risk benchmark
 
-simulate_shock_dependent_scale_dgp <- function(T,
-                               intercept = 0,
-                               rho = 0.6,
-                               beta = 1,
-                               sigma_x = 1,
-                               sigma_y = 1,
-                               sdlog = 0.5,
-                               burn = 200) {
+simulate_downside_risk_dgp <- function(T, horizon,
+                                       phi = 0.8,
+                                       kappa = 0.6,
+                                       sigma_r = 0.3,
+                                       sigma_x = 1,
+                                       p_max = 0.30,
+                                       alpha = -1,
+                                       mu = 0,
+                                       sigma_y = 1,
+                                       disaster_size = 2.5,
+                                       reference_r = 0,
+                                       x_baseline = 0,
+                                       delta = 1,
+                                       burn = 200) {
   
   n_total <- T + burn
   
   # Observed structural shock
   x <- rnorm(n_total, mean = 0, sd = sigma_x)
   
-  # Shifted and rescaled lognormal innovation
-  lognormal_draw <- rlnorm(
-    n_total,
-    meanlog = 0,
-    sdlog = sdlog
-  )
+  # Persistent downside-risk state
+  eta_r <- rnorm(n_total, mean = 0, sd = sigma_r)
   
-  lognormal_mode <- exp(-sdlog^2)
-  
-  lognormal_sd <- sqrt(
-    (exp(sdlog^2) - 1) * exp(sdlog^2)
-  )
-  
-  epsilon_y <- sigma_y *
-    (lognormal_draw - lognormal_mode) /
-    lognormal_sd
-  
-  y <- numeric(n_total)
-  y[1] <- intercept / (1 - rho)
+  r <- numeric(n_total)
   
   for (t in 2:n_total) {
-    y[t] <- intercept +
-      rho * y[t - 1] +
-      beta * x[t - 1] +
-      exp(x[t - 1]) * epsilon_y[t]
+    r[t] <- phi * r[t - 1] +
+      kappa * x[t - 1] +
+      eta_r[t]
   }
   
-  # Remove burn-in and align lagged variables
+  # The shock changes the probability, but not the locations,
+  # of the normal and disaster components
+  disaster_probability <- p_max * pnorm(alpha + r)
+  
+  disaster <- rbinom(
+    n_total,
+    size = 1,
+    prob = disaster_probability
+  )
+  
+  y <- mu -
+    disaster_size * disaster +
+    rnorm(n_total, mean = 0, sd = sigma_y)
+  
+  # Remove the burn-in observations
   keep <- (burn + 1):n_total
   
   data <- data.frame(
     x = x[keep],
     y = y[keep],
-    y_lag = y[keep - 1],
-    x_lag = x[keep - 1]
+    r = r[keep],
+    disaster_probability = disaster_probability[keep],
+    disaster = disaster[keep]
   )
   
-  list(
-    data = data,
-    parameters = list(
-      intercept = intercept,
-      rho = rho,
-      beta = beta,
-      sigma_x = sigma_x,
-      sigma_y = sigma_y,
-      sdlog = sdlog
-    )
-  )
-}
-
-# Population responses under paired counterfactual paths
-
-simulate_shock_dependent_scale_response <- function(S = 2000000, 
-                                    horizon = 20, 
-                                    y_initial = 0,
-                                    x_baseline = 0,
-                                    delta = 1,
-                                    intercept = 0,
-                                    rho = 0.6,
-                                    beta = 1,
-                                    sigma_x = 1,
-                                    sigma_y = 1,
-                                    sdlog = 0.5,
-                                    mode_function = NULL) {
+  # Conditional distribution of r_{t+h}
+  h <- seq_len(horizon)
   
-  lognormal_mode <- exp(-sdlog^2)
+  A_h <- (1 - phi^(2 * h)) /
+    (1 - phi^2)
   
-  lognormal_sd <- sqrt(
-    (exp(sdlog^2) - 1) * exp(sdlog^2)
+  A_h_minus_1 <- (1 - phi^(2 * (h - 1))) /
+    (1 - phi^2)
+  
+  risk_variance <- sigma_r^2 * A_h +
+    kappa^2 * sigma_x^2 * A_h_minus_1
+  
+  risk_scale <- sqrt(1 + risk_variance)
+  
+  risk_mean_baseline <- phi^h * reference_r +
+    kappa * phi^(h - 1) * x_baseline
+  
+  risk_mean_shocked <- phi^h * reference_r +
+    kappa * phi^(h - 1) * (x_baseline + delta)
+  
+  # Probit-normal identity gives the mixture weights analytically
+  probability_baseline <- p_max * pnorm(
+    (alpha + risk_mean_baseline) /
+      risk_scale
   )
   
-  baseline_paths <- matrix(
-    NA_real_,
-    nrow = S,
-    ncol = horizon + 1
+  probability_shocked <- p_max * pnorm(
+    (alpha + risk_mean_shocked) /
+      risk_scale
   )
   
-  shocked_paths <- matrix(
-    NA_real_,
-    nrow = S,
-    ncol = horizon + 1
-  )
+  mean_baseline <- mu -
+    disaster_size * probability_baseline
   
-  colnames(baseline_paths) <- paste0("h", 0:horizon)
-  colnames(shocked_paths) <- paste0("h", 0:horizon)
+  mean_shocked <- mu -
+    disaster_size * probability_shocked
   
-  y_baseline <- rep(y_initial, S)
-  y_shocked <- rep(y_initial, S)
-  
-  baseline_paths[, 1] <- y_baseline
-  shocked_paths[, 1] <- y_shocked
-  
-  if (horizon >= 1) {
+  # Deterministic Gaussian-mixture median
+  mixture_median <- function(probability) {
     
-    for (h in 1:horizon) {
-      
-      # Only the time-t shock differs across experiments
-      if (h == 1) {
-        x_baseline_h <- x_baseline
-        x_shocked_h <- x_baseline + delta
-      } else {
-        x_future <- rnorm(
-          S,
-          mean = 0,
-          sd = sigma_x
-        )
-        
-        x_baseline_h <- x_future
-        x_shocked_h <- x_future
-      }
-      
-      # Same innovation draw in both counterfactual paths
-      u <- sigma_y * (
-        rlnorm(
-          S,
-          meanlog = 0,
-          sdlog = sdlog
-        ) -
-          lognormal_mode
-      ) / lognormal_sd
-      
-      y_baseline <- intercept +
-        rho * y_baseline +
-        beta * x_baseline_h +
-        exp(x_baseline_h) * u
-      
-      y_shocked <- intercept +
-        rho * y_shocked +
-        beta * x_shocked_h +
-        exp(x_shocked_h) * u
-      
-      baseline_paths[, h + 1] <- y_baseline
-      shocked_paths[, h + 1] <- y_shocked
-    }
+    uniroot(
+      function(q) {
+        (1 - probability) *
+          pnorm((q - mu) / sigma_y) +
+          probability *
+          pnorm(
+            (q - (mu - disaster_size)) /
+              sigma_y
+          ) -
+          0.5
+      },
+      lower = mu - disaster_size - 8 * sigma_y,
+      upper = mu + 8 * sigma_y,
+      tol = 1e-12
+    )$root
   }
   
-  mean_baseline <- colMeans(baseline_paths)
-  mean_shocked <- colMeans(shocked_paths)
-  
-  median_baseline <- apply(
-    baseline_paths,
-    2,
-    median
+  median_baseline <- vapply(
+    probability_baseline,
+    mixture_median,
+    numeric(1)
   )
   
-  median_shocked <- apply(
-    shocked_paths,
-    2,
-    median
+  median_shocked <- vapply(
+    probability_shocked,
+    mixture_median,
+    numeric(1)
   )
   
-  # The initial state has a known degenerate mode.
-  # Remaining modes are filled once a mode function is supplied.
-  mode_baseline <- rep(NA_real_, horizon + 1)
-  mode_shocked <- rep(NA_real_, horizon + 1)
-  
-  mode_baseline[1] <- y_initial
-  mode_shocked[1] <- y_initial
-  
-  if (!is.null(mode_function) && horizon >= 1) {
+  # Deterministic Gaussian-mixture mode. With the baseline
+  # calibration, the density is unimodal and this is its unique mode.
+  mixture_mode <- function(probability) {
     
-    columns <- 2:(horizon + 1)
-    
-    mode_baseline[columns] <- apply(
-      baseline_paths[, columns, drop = FALSE],
-      2,
-      mode_function
-    )
-    
-    mode_shocked[columns] <- apply(
-      shocked_paths[, columns, drop = FALSE],
-      2,
-      mode_function
-    )
-  }
-  
-  # Exact mean-response benchmark
-  u_mean <- sigma_y *
-    (exp(sdlog^2 / 2) - exp(-sdlog^2)) /
-    lognormal_sd
-  
-  analytic_mean_response <- numeric(horizon + 1)
-  
-  if (horizon >= 1) {
-    analytic_mean_response[2:(horizon + 1)] <-
-      rho^(0:(horizon - 1)) * (
-        beta * delta +
-          u_mean * (
-            exp(x_baseline + delta) -
-              exp(x_baseline)
+    uniroot(
+      function(q) {
+        (1 - probability) *
+          (q - mu) *
+          dnorm((q - mu) / sigma_y) +
+          probability *
+          (q - (mu - disaster_size)) *
+          dnorm(
+            (q - (mu - disaster_size)) /
+              sigma_y
           )
-      )
+      },
+      lower = mu - disaster_size / 2,
+      upper = mu,
+      tol = 1e-12
+    )$root
   }
   
-  response <- data.frame(
-    horizon = 0:horizon,
+  mode_baseline <- vapply(
+    probability_baseline,
+    mixture_mode,
+    numeric(1)
+  )
+  
+  mode_shocked <- vapply(
+    probability_shocked,
+    mixture_mode,
+    numeric(1)
+  )
+  
+  true_response <- data.frame(
+    horizon = h,
+    probability_baseline = probability_baseline,
+    probability_shocked = probability_shocked,
     mean_baseline = mean_baseline,
     mean_shocked = mean_shocked,
     mean_response = mean_shocked - mean_baseline,
-    mean_response_analytic = analytic_mean_response,
     median_baseline = median_baseline,
     median_shocked = median_shocked,
     median_response = median_shocked - median_baseline,
@@ -551,48 +503,25 @@ simulate_shock_dependent_scale_response <- function(S = 2000000,
     mode_response = mode_shocked - mode_baseline
   )
   
+  # Unlike DGPs 1--4, the true modal function is mildly nonlinear
+  # in x. The linear LMP is therefore a substantive approximation,
+  # not an exactly specified estimator-efficiency benchmark.
   list(
-    baseline_paths = baseline_paths,
-    shocked_paths = shocked_paths,
-    response = response,
+    data = data,
+    true_response = true_response,
     parameters = list(
-      S = S,
-      horizon = horizon,
-      y_initial = y_initial,
-      x_baseline = x_baseline,
-      delta = delta,
-      intercept = intercept,
-      rho = rho,
-      beta = beta,
+      phi = phi,
+      kappa = kappa,
+      sigma_r = sigma_r,
       sigma_x = sigma_x,
+      p_max = p_max,
+      alpha = alpha,
+      mu = mu,
       sigma_y = sigma_y,
-      sdlog = sdlog
+      disaster_size = disaster_size,
+      reference_r = reference_r,
+      x_baseline = x_baseline,
+      delta = delta
     )
   )
 }
-
-
-# Population mode from a Gaussian KDE
-
-population_mode <- function(x, bw = 1.5 * bw.nrd0(x), n = 8192) {
-  
-  limits <- quantile(
-    x,
-    probs = c(0.001, 0.999),
-    names = FALSE
-  )
-  
-  density_estimate <- density(
-    x,
-    kernel = "gaussian",
-    bw = bw,
-    n = n,
-    from = limits[1],
-    to = limits[2]
-  )
-  
-  density_estimate$x[
-    which.max(density_estimate$y)
-  ]
-}
-
