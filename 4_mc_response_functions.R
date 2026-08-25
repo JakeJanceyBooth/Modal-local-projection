@@ -96,9 +96,7 @@ for (replication in seq_len(n_replications)) {
       "response"
     }
     
-    dgp_truth <- simulated_dgp$true_response[
-      [truth_column]
-    ][
+    dgp_truth <- simulated_dgp$true_response[[truth_column]][
       match(
         horizons,
         simulated_dgp$true_response$horizon
