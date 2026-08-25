@@ -2,7 +2,9 @@
 # the modes of DGP 5. We find b = 1.5 bw.nrd0(x) is optimal, and we should
 # use S = 2,000,000
 
-# One-step population-mode bandwidth calibration function
+# One-step population-mode bandwidth calibration function ----
+
+source("2_dgps.R")
 
 calibrate_one_step_population_mode <- function(
     S_values,
@@ -323,7 +325,7 @@ selected_bw_multiplier <- 1.25
 
 set.seed(123)
 
-stability_paths <- simulate_shape_response(
+stability_paths <- simulate_shock_response(
   S = max(stability_S_values),
   horizon = stability_horizon,
   y_initial = 0,
@@ -522,7 +524,7 @@ bandwidth_stability
 sample_size_stability
 stability_minimum_boundary_fraction
 
-# Where is bandwidth sensitivity largest?
+# Where is bandwidth sensitivity largest? ----
 
 bandwidth_comparison$lower_difference <- abs(
   bandwidth_comparison$lower_response -
@@ -544,7 +546,7 @@ bandwidth_comparison[
 ][1:10, ]
 
 
-# Where is sample-size sensitivity largest?
+# Where is sample-size sensitivity largest? ----
 
 sample_size_comparison$absolute_difference <- abs(
   sample_size_comparison$large_S_response -
@@ -554,6 +556,9 @@ sample_size_comparison$absolute_difference <- abs(
 sample_size_comparison[
   order(-sample_size_comparison$absolute_difference),
 ][1:10, ]
+
+# finally testing across even larger sample sizes and the two
+# best bandwidth rules so far ----
 
 final_S_values <- c(
   500000,
@@ -568,7 +573,7 @@ final_bw_multipliers <- c(
 
 set.seed(123)
 
-final_paths <- simulate_shape_response(
+final_paths <- simulate_shock_response(
   S = max(final_S_values),
   horizon = 5,
   y_initial = 0,

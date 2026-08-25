@@ -647,6 +647,7 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
     bandwidth = bandwidth,
     objective = objective,
     iterations = iterations,
+    converged = n_converged_starts > 0,
     selected_start = selected_start,
     n_converged_starts = n_converged_starts,
     bw_constant = bw_constant
@@ -738,7 +739,7 @@ var_response <- function(fitted_var, shock, response,
     stop("shock and response must match the VAR variable names.")
   }
   
-  horizons <- 0:horizon
+  horizons <- seq_len(horizon)
   
   # response, here, gets the coefficients mapping the reduced-form
   # innovation of size \delta in x at time t to the value of y 

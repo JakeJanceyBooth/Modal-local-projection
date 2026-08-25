@@ -42,9 +42,8 @@ simulate_gaussian_dgp <- function(T, horizon,
   )
   
   # R_0 = 0 and R_h = beta * rho^(h - 1) for h >= 1
-  h <- 0:horizon
+  h <- seq_len(horizon)
   response <- beta * rho^(h - 1)
-  response[1] <- 0
   
   true_response <- data.frame(
     horizon = h,
@@ -118,9 +117,8 @@ simulate_skewed_dgp <- function(T, horizon,
   )
   
   # The response slope is unchanged by additive skewness
-  h <- 0:horizon
+  h <- seq_len(horizon)
   response <- beta * rho^(h - 1)
-  response[1] <- 0
   
   true_response <- data.frame(
     horizon = h,
@@ -191,9 +189,8 @@ simulate_disaster_dgp <- function(T, horizon,
   )
   
   # Additive disasters do not change the response slope
-  h <- 0:horizon
+  h <- seq_len(horizon)
   response <- beta * rho^(h - 1)
-  response[1] <- 0
   
   true_response <- data.frame(
     horizon = h,
@@ -287,18 +284,23 @@ simulate_rich_state_dgp <- function(T, horizon,
   )
   
   # AR(2) response recursion
-  h <- 0:horizon
-  response <- numeric(length(h))
+  h <- seq_len(horizon)
+  response <- numeric(horizon)
   
-  if (horizon >= 1) {
-    response[2] <- beta
+  # R_1 = beta
+  response[1] <- beta
+  
+  # R_2 = rho1 * R_1 + rho2 * R_0, where R_0 = 0
+  if (horizon >= 2) {
+    response[2] <- rho1 * beta
   }
   
-  if (horizon >= 2) {
-    for (j in 2:horizon) {
-      response[j + 1] <-
-        rho1 * response[j] +
-        rho2 * response[j - 1]
+  # R_h = rho1 R_{h-1} + rho2 R_{h-2}
+  if (horizon >= 3) {
+    for (j in 3:horizon) {
+      response[j] <-
+        rho1 * response[j - 1] +
+        rho2 * response[j - 2]
     }
   }
   
@@ -325,9 +327,9 @@ simulate_rich_state_dgp <- function(T, horizon,
   )
 }
 
-# Shock-dependent distributional shape
+# Shock-dependent distributional shock_dependent_scale
 
-simulate_shape_dgp <- function(T,
+simulate_shock_dependent_scale_dgp <- function(T,
                                intercept = 0,
                                rho = 0.6,
                                beta = 1,
@@ -393,7 +395,7 @@ simulate_shape_dgp <- function(T,
 
 # Population responses under paired counterfactual paths
 
-simulate_shape_response <- function(S = 2000000, 
+simulate_shock_dependent_scale_response <- function(S = 2000000, 
                                     horizon = 20, 
                                     y_initial = 0,
                                     x_baseline = 0,
