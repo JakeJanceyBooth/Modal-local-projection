@@ -435,10 +435,12 @@ fit_median_lp <- function(y, x, z = NULL, horizons) {
 }
 
 fit_modal_lp <- function(y, x, z = NULL, horizons,
-                         bw_constant = 1.6,
+                         bw_constant = 2.4,
+                         start_quantiles = 0.5,
                          tol_theta = 1e-6,
                          tol_objective = 1e-8,
-                         max_iter = 1000) {
+                         max_iter = 1000,
+                         return_start_diagnostics = FALSE) {
   
   horizons <- sort(unique(horizons))
   
@@ -499,23 +501,44 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
         )
       )
     }
-
-    # Median-regression starting value
     
-    median_fit <- quantreg::rq.fit(
-      x = dat$D_h,
-      y = dat$y_h,
-      tau = 0.5,
-      method = "br"
+    if (
+      length(start_quantiles) == 0 ||
+      any(!is.finite(start_quantiles)) ||
+      any(start_quantiles <= 0 | start_quantiles >= 1)
+    ) {
+      stop("start_quantiles must lie strictly between zero and one.")
+    }
+    
+    start_quantiles <- sort(unique(start_quantiles))
+
+    # quantile-regression starting values
+    
+    quantile_starts <- lapply(
+      start_quantiles,
+      function(tau) {
+        quantreg::rq.fit(
+          x = dat$D_h,
+          y = dat$y_h,
+          tau = tau,
+          method = "br"
+        )$coefficients
+      }
     )
     
-    theta_median <- median_fit$coefficients
+    quantile_names <- paste0(
+      "q",
+      100 * start_quantiles
+    )
     
-    # starting values
+    # Preserve the current diagnostic label for the default start
+    quantile_names[start_quantiles == 0.5] <- "median"
     
-    starts <- list(
-      ols = theta_ols,
-      median = theta_median
+    names(quantile_starts) <- quantile_names
+    
+    starts <- c(
+      list(ols = theta_ols),
+      quantile_starts
     )
     
     # run MEM from each starting value
@@ -546,9 +569,43 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
       logical(1)
     )
     
+    # optional diagnostics for every starting value
+    
+    start_diagnostics <- NULL
+    
+    if (return_start_diagnostics) {
+      
+      start_diagnostics <- data.frame(
+        start = names(starts),
+        converged = converged,
+        objective = vapply(
+          mem_runs,
+          function(run) run$objective,
+          numeric(1)
+        ),
+        iterations = vapply(
+          mem_runs,
+          function(run) run$iterations,
+          integer(1)
+        )
+      )
+      
+      start_diagnostics$coefficients <- lapply(
+        mem_runs,
+        function(run) {
+          setNames(
+            as.numeric(run$coefficients),
+            colnames(dat$D_h)
+          )
+        }
+      )
+    }
+    
     #could maybe make it so the function doesn't totally stop just because
     #none of the runs converged at horizon h. Maybe better to recover
     #all the horizon estimates we can and note which ones failed.
+    
+    #zero convergences probably won't ever be a problem, though
     
     if (!any(converged)) {
       stop(
@@ -587,7 +644,8 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
       objective = best_fit$objective,
       iterations = best_fit$iterations,
       selected_start = names(starts)[best_index],
-      n_converged_starts = sum(converged)
+      n_converged_starts = sum(converged),
+      start_diagnostics = start_diagnostics
     )
   })
   
@@ -638,6 +696,25 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
     integer(1)
   )
   
+  start_diagnostics <- NULL
+  
+  if (return_start_diagnostics) {
+    
+    start_diagnostics <- lapply(
+      seq_along(fits),
+      function(i) {
+        
+        diagnostics_i <-
+          fits[[i]]$start_diagnostics
+        
+        diagnostics_i$horizon <-
+          horizons[i]
+        
+        diagnostics_i
+      }
+    )
+  }
+  
   list(
     method = "modal_lp",
     horizons = horizons,
@@ -648,6 +725,7 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
     objective = objective,
     iterations = iterations,
     converged = n_converged_starts > 0,
+    start_diagnostics = start_diagnostics,
     selected_start = selected_start,
     n_converged_starts = n_converged_starts,
     bw_constant = bw_constant

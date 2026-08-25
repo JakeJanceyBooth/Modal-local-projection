@@ -646,18 +646,18 @@ dir.create(
 )
 
 
-# extract opulation truths ----
+# extract population truths ----
 
 response_truth <- bind_rows(
   modal_results |>
-    select(
+    dplyr::select(
       dgp,
       estimator,
       horizon,
       truth
     ),
   other_results |>
-    select(
+    dplyr::select(
       dgp,
       estimator,
       horizon,
@@ -768,7 +768,7 @@ downside_plot_data <-
     dgp == "downside_risk",
     estimator != "VAR"
   ) |>
-  select(
+  dplyr::select(
     estimator,
     sample_size,
     horizon,
@@ -852,6 +852,7 @@ plot_gaussian <- ggplot(
         estimator == "Mean LP"
       ),
     aes(
+      x = horizon,
       y = truth
     ),
     inherit.aes = FALSE,
