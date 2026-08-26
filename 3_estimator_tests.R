@@ -209,7 +209,7 @@ forecast_accuracy
 
 # ----
 # We find modal LP performs the worst for response functions.
-# All estimators have basically similar forecast performance.
+# All estimators have basically similar in-sample forecast performance.
 
 # Quick plot of estimated response functions to see how they compare ----
 
