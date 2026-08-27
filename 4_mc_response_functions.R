@@ -640,8 +640,14 @@ saveRDS(modal_results, "modal_response_results.rds")
 
 saveRDS(other_results, "other_response_results.rds")
 
-dir.create(
+results_directory <- file.path(
   "results",
+  "responses"
+)
+
+dir.create(
+  results_directory,
+  recursive = TRUE,
   showWarnings = FALSE
 )
 
@@ -825,7 +831,7 @@ plot_downside <- ggplot(
   theme_minimal()
 
 
-# plot 4. Gaussian common-target responses ----
+# plot 4-5. common-target responses ----
 
 gaussian_plot_data <-
   response_plot_data |>
@@ -874,7 +880,74 @@ plot_gaussian <- ggplot(
   theme_minimal()
 
 
-# plot 5. DGP 5 modal LP Monte Carlo uncertainty ----
+common_target_plot_data <-
+  response_plot_data |>
+  filter(
+    dgp %in% c(
+      "gaussian",
+      "skewed",
+      "disaster",
+      "rich_state"
+    )
+  ) |>
+  mutate(
+    dgp_label = recode(
+      dgp,
+      gaussian = "Gaussian",
+      skewed = "Skewed",
+      disaster = "Rare disaster",
+      rich_state = "Rich state"
+    )
+  )
+
+plot_common_target <- ggplot(
+  common_target_plot_data,
+  aes(
+    horizon,
+    average_estimate,
+    colour = estimator
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(
+    linewidth = 0.9
+  ) +
+  geom_line(
+    data = common_target_plot_data |>
+      filter(
+        estimator == "Mean LP"
+      ),
+    aes(
+      x = horizon,
+      y = truth
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.9
+  ) +
+  facet_grid(
+    dgp_label ~ sample_size,
+    scales = "free_y",
+    labeller = label_both
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Response",
+    colour = "Estimator"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+
+# plot 6. DGP 5 modal LP Monte Carlo uncertainty ----
 
 plot_downside_modal_mcse <- ggplot(
   response_plot_data |>
@@ -927,7 +1000,8 @@ response_plots <- list(
   downside_response = plot_downside,
   gaussian_response = plot_gaussian,
   downside_modal_mcse =
-    plot_downside_modal_mcse
+    plot_downside_modal_mcse,
+  common_target_response = plot_common_target
 )
 
 
@@ -941,7 +1015,7 @@ run_label <- paste0(
 saveRDS(
   modal_results,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "modal_results_",
       run_label,
@@ -953,7 +1027,7 @@ saveRDS(
 saveRDS(
   other_results,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "other_results_",
       run_label,
@@ -965,7 +1039,7 @@ saveRDS(
 saveRDS(
   response_comparison_summary,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "response_summary_",
       run_label,
@@ -977,7 +1051,7 @@ saveRDS(
 saveRDS(
   response_truth,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "response_truth_",
       run_label,
@@ -989,7 +1063,7 @@ saveRDS(
 saveRDS(
   response_plot_data,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "response_plot_data_",
       run_label,
@@ -1001,7 +1075,7 @@ saveRDS(
 saveRDS(
   response_plots,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "response_plots_",
       run_label,

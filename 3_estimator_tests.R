@@ -207,7 +207,8 @@ rownames(forecast_accuracy) <- NULL
 
 forecast_accuracy
 
-# ----
+# Results ----
+
 # We find modal LP performs the worst for response functions.
 # All estimators have basically similar in-sample forecast performance.
 

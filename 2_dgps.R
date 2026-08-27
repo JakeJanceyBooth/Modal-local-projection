@@ -8,7 +8,7 @@
 # Gaussian common-target benchmark
 simulate_gaussian_dgp <- function(T, horizon,
                                   intercept = 0,
-                                  rho = 0.6,
+                                  rho = 0.8,
                                   beta = 1,
                                   sigma_x = 1,
                                   sigma_y = 1,
@@ -66,7 +66,7 @@ simulate_gaussian_dgp <- function(T, horizon,
 # Additive-skewness benchmark
 simulate_skewed_dgp <- function(T, horizon,
                                 intercept = 0,
-                                rho = 0.6,
+                                rho = 0.8,
                                 beta = 1,
                                 sigma_x = 1,
                                 sigma_y = 1,
@@ -142,12 +142,12 @@ simulate_skewed_dgp <- function(T, horizon,
 # Rare-disaster mixture benchmark
 simulate_disaster_dgp <- function(T, horizon,
                                   intercept = 0,
-                                  rho = 0.6,
+                                  rho = 0.8,
                                   beta = 1,
                                   sigma_x = 1,
                                   sigma_y = 1,
-                                  disaster_probability = 0.01,
-                                  disaster_size = 10,
+                                  disaster_probability = 0.05,
+                                  disaster_size = 7.5,
                                   burn = 200) {
   
   n_total <- T + burn
@@ -328,7 +328,6 @@ simulate_rich_state_dgp <- function(T, horizon,
 }
 
 # Shock-dependent downside-risk benchmark
-
 simulate_downside_risk_dgp <- function(T, horizon,
                                        phi = 0.8,
                                        kappa = 0.6,

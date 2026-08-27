@@ -33,9 +33,9 @@ sample_sizes <- c(
 
 horizons <- c(
   1,
+  2,
   5,
-  10,
-  20
+  10
 )
 
 estimator_names <- c(
@@ -46,7 +46,7 @@ estimator_names <- c(
 )
 
 n_forecast_origins <- 20
-n_replications <- 100
+n_replications <- 5000
 
 bw_constant <- 2.4
 start_quantiles <- 0.5
@@ -972,23 +972,128 @@ if (forecast_row != n_forecast_results + 1) {
   )
 }
 
-# Replication-level forecast scores ----
-#
-# Squared-error loss naturally favors the conditional mean.
-# Absolute-error loss naturally favors the conditional median.
-# Neither criterion is inherently targeted to the conditional mode.
-#
-# Forecast origins within a replication are dependent, so
-# replication-level averages are formed before the final summary.
+# Fixed-width forecast-coverage settings ----
 
-forecast_scores_by_replication <-
+# Every interval is centered on an estimator's point forecast:
+# [forecast - half_width, forecast + half_width].
+# This is a fixed-width coverage comparison, not a newly proposed
+# loss function that uniquely elicits the conditional mode.
+
+half_widths <- c(
+  0.25,
+  0.50,
+  0.75,
+  1.00,
+  1.50,
+  2.00
+)
+
+results_directory <- file.path(
+  "results",
+  "forecasting"
+)
+
+dir.create(
+  results_directory,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+run_label <- paste0(
+  forecast_design_label,
+  "_R",
+  n_replications,
+  "_O",
+  n_forecast_origins,
+  "_h",
+  paste(horizons, collapse = "-")
+)
+
+save_run_object <- function(object, file_stem) {
+  saveRDS(
+    object,
+    file.path(
+      results_directory,
+      paste0(file_stem, "_", run_label, ".rds")
+    )
+  )
+  
+  invisible(NULL)
+}
+
+mcse_from_replications <- function(x) {
+  x <- x[is.finite(x)]
+  
+  if (length(x) <= 1) {
+    return(NA_real_)
+  }
+  
+  stats::sd(x) / sqrt(length(x))
+}
+
+forecast_run_settings <- list(
+  forecast_design_label = forecast_design_label,
+  dgp_names = dgp_names,
+  dgp_parameters = dgp_parameters,
+  sample_sizes = sample_sizes,
+  horizons = horizons,
+  estimator_names = estimator_names,
+  half_widths = half_widths,
+  total_widths = 2 * half_widths,
+  coverage_rule =
+    "absolute_error <= half_width",
+  n_forecast_origins = n_forecast_origins,
+  n_replications = n_replications,
+  bw_constant = bw_constant,
+  start_quantiles = start_quantiles,
+  estimation_cutoff = estimation_cutoff,
+  simulation_size = simulation_size,
+  mc_seed = mc_seed
+)
+
+
+# Checkpoint expensive output before analysis ----
+#
+# Save these objects before substantial summarization or plotting so
+# that a later analysis error cannot erase the expensive simulation.
+
+save_run_object(
+  forecast_results_raw,
+  "forecast_results_raw"
+)
+
+save_run_object(
+  modal_forecast_fit_diagnostics,
+  "modal_forecast_fit_diagnostics"
+)
+
+save_run_object(
+  forecast_run_settings,
+  "forecast_run_settings"
+)
+
+
+# Common success indicator used by the derived analyses ----
+
+forecast_evaluation_data <-
   forecast_results_raw |>
   dplyr::mutate(
     success =
       is.na(failure) &
       is.finite(forecast) &
       is.finite(realized)
-  ) |>
+  )
+
+
+# Secondary conventional forecast scores ----
+#
+# Squared-error loss naturally favors the conditional mean.
+# Absolute-error loss naturally favors the conditional median.
+# Neither criterion is inherently targeted to the conditional mode.
+# Origins are averaged within replication before the final summary.
+
+forecast_scores_by_replication <-
+  forecast_evaluation_data |>
   dplyr::group_by(
     dgp,
     sample_size,
@@ -1025,9 +1130,6 @@ forecast_scores_by_replication <-
     horizon
   )
 
-
-# Overall forecast summary ----
-
 forecast_summary <-
   forecast_scores_by_replication |>
   dplyr::mutate(
@@ -1042,45 +1144,27 @@ forecast_summary <-
     horizon
   ) |>
   dplyr::summarise(
-    mean_forecast_error =
-      if (any(score_available)) {
-        mean(
-          mean_forecast_error[
-            score_available
-          ]
-        )
-      } else {
-        NA_real_
-      },
+    mean_forecast_error = if (any(score_available)) {
+      mean(mean_forecast_error[score_available])
+    } else {
+      NA_real_
+    },
     mae = if (any(score_available)) {
-      mean(
-        mean_absolute_error[
-          score_available
-        ]
-      )
+      mean(mean_absolute_error[score_available])
     } else {
       NA_real_
     },
     rmse = if (any(score_available)) {
-      sqrt(
-        mean(
-          mean_squared_error[
-            score_available
-          ]
-        )
-      )
+      sqrt(mean(mean_squared_error[score_available]))
     } else {
       NA_real_
     },
     n_replications = dplyr::n(),
-    n_successful_replications =
-      sum(score_available),
+    n_successful_replications = sum(score_available),
     n_forecasts = sum(n_origins),
-    n_successful_forecasts =
-      sum(n_success),
+    n_successful_forecasts = sum(n_success),
     success_rate =
-      n_successful_forecasts /
-      n_forecasts,
+      n_successful_forecasts / n_forecasts,
     .groups = "drop"
   ) |>
   dplyr::arrange(
@@ -1091,198 +1175,38 @@ forecast_summary <-
   )
 
 
-# Forecast plots ----
+# Average issued forecasts ----
 
-forecast_plot_data <-
-  forecast_summary |>
-  dplyr::mutate(
-    dgp = factor(
-      dgp,
-      levels = dgp_names
-    ),
-    sample_size = factor(
-      sample_size,
-      levels = sample_sizes
-    ),
-    estimator = factor(
-      estimator,
-      levels = estimator_names
-    )
-  )
-
-
-# RMSE 
-
-forecast_rmse_plot <-
-  ggplot2::ggplot(
-    forecast_plot_data,
-    ggplot2::aes(
-      x = horizon,
-      y = rmse,
-      color = estimator,
-      linetype = estimator,
-      group = estimator
-    )
-  ) +
-  ggplot2::geom_line(
-    linewidth = 0.8
-  ) +
-  ggplot2::geom_point(
-    size = 1.8
-  ) +
-  ggplot2::facet_grid(
-    rows = ggplot2::vars(dgp),
-    cols = ggplot2::vars(sample_size)
-  ) +
-  ggplot2::scale_x_continuous(
-    breaks = horizons
-  ) +
-  ggplot2::labs(
-    x = "Horizon",
-    y = "RMSE",
-    color = "Estimator",
-    linetype = "Estimator"
-  ) +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
-
-
-# MAE 
-
-forecast_mae_plot <-
-  ggplot2::ggplot(
-    forecast_plot_data,
-    ggplot2::aes(
-      x = horizon,
-      y = mae,
-      color = estimator,
-      linetype = estimator,
-      group = estimator
-    )
-  ) +
-  ggplot2::geom_line(
-    linewidth = 0.8
-  ) +
-  ggplot2::geom_point(
-    size = 1.8
-  ) +
-  ggplot2::facet_grid(
-    rows = ggplot2::vars(dgp),
-    cols = ggplot2::vars(sample_size)
-  ) +
-  ggplot2::scale_x_continuous(
-    breaks = horizons
-  ) +
-  ggplot2::labs(
-    x = "Horizon",
-    y = "MAE",
-    color = "Estimator",
-    linetype = "Estimator"
-  ) +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
-
-
-# Mean forecast error
-
-forecast_error_plot <-
-  ggplot2::ggplot(
-    forecast_plot_data,
-    ggplot2::aes(
-      x = horizon,
-      y = mean_forecast_error,
-      color = estimator,
-      linetype = estimator,
-      group = estimator
-    )
-  ) +
-  ggplot2::geom_hline(
-    yintercept = 0,
-    linewidth = 0.4
-  ) +
-  ggplot2::geom_line(
-    linewidth = 0.8
-  ) +
-  ggplot2::geom_point(
-    size = 1.8
-  ) +
-  ggplot2::facet_grid(
-    rows = ggplot2::vars(dgp),
-    cols = ggplot2::vars(sample_size),
-    scales = "free_y"
-  ) +
-  ggplot2::scale_x_continuous(
-    breaks = horizons
-  ) +
-  ggplot2::labs(
-    x = "Horizon",
-    y = "Mean forecast error",
-    color = "Estimator",
-    linetype = "Estimator"
-  ) +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
-
-# Forecast success rates
-
-forecast_success_plot <-
-  ggplot2::ggplot(
-    forecast_plot_data,
-    ggplot2::aes(
-      x = horizon,
-      y = success_rate,
-      color = estimator,
-      linetype = estimator,
-      group = estimator
-    )
-  ) +
-  ggplot2::geom_line(
-    linewidth = 0.8
-  ) +
-  ggplot2::geom_point(
-    size = 1.8
-  ) +
-  ggplot2::facet_grid(
-    rows = ggplot2::vars(dgp),
-    cols = ggplot2::vars(sample_size)
-  ) +
-  ggplot2::scale_x_continuous(
-    breaks = horizons
-  ) +
-  ggplot2::scale_y_continuous(
-    limits = c(0, 1),
-    labels = function(x) {
-      paste0(
-        round(100 * x),
-        "%"
-      )
-    }
-  ) +
-  ggplot2::labs(
-    x = "Horizon",
-    y = "Forecast success rate",
-    color = "Estimator",
-    linetype = "Estimator"
-  ) +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
-
-# Average issued forecasts
-
-average_forecast_data <-
-  forecast_results_raw |>
-  dplyr::filter(
-    is.na(failure),
-    is.finite(forecast)
+average_forecast_by_replication <-
+  forecast_evaluation_data |>
+  dplyr::group_by(
+    dgp,
+    sample_size,
+    replication,
+    estimator,
+    horizon
   ) |>
+  dplyr::summarise(
+    average_forecast = if (any(success)) {
+      mean(forecast[success])
+    } else {
+      NA_real_
+    },
+    n_origins = dplyr::n(),
+    n_success = sum(success),
+    success_rate = mean(success),
+    .groups = "drop"
+  ) |>
+  dplyr::arrange(
+    match(dgp, dgp_names),
+    sample_size,
+    replication,
+    match(estimator, estimator_names),
+    horizon
+  )
+
+average_forecast_summary <-
+  average_forecast_by_replication |>
   dplyr::group_by(
     dgp,
     sample_size,
@@ -1290,86 +1214,157 @@ average_forecast_data <-
     horizon
   ) |>
   dplyr::summarise(
-    average_forecast = mean(forecast),
+    mcse =
+      mcse_from_replications(average_forecast),
+    mean_average_forecast =
+      if (any(is.finite(average_forecast))) {
+        mean(
+          average_forecast[
+            is.finite(average_forecast)
+          ]
+        )
+      } else {
+        NA_real_
+      },
+    n_replications = dplyr::n(),
+    n_replications_available =
+      sum(is.finite(average_forecast)),
+    n_forecasts = sum(n_origins),
+    n_successful_forecasts = sum(n_success),
+    success_rate =
+      n_successful_forecasts / n_forecasts,
+    .groups = "drop"
+  ) |>
+  dplyr::rename(
+    average_forecast = mean_average_forecast
+  ) |>
+  dplyr::mutate(
+    mc_lower = average_forecast - 1.96 * mcse,
+    mc_upper = average_forecast + 1.96 * mcse
+  ) |>
+  dplyr::arrange(
+    match(dgp, dgp_names),
+    sample_size,
+    match(estimator, estimator_names),
+    horizon
+  )
+
+
+# Absolute fixed-width coverage ----
+#
+# The raw forecast table is never expanded by width. Each width is
+# evaluated and immediately aggregated over origins within replication.
+
+coverage_replication_list <- vector(
+  "list",
+  length(half_widths)
+)
+
+for (width_index in seq_along(half_widths)) {
+  current_half_width <- half_widths[width_index]
+  
+  coverage_replication_list[[width_index]] <-
+    forecast_evaluation_data |>
+    dplyr::group_by(
+      dgp,
+      sample_size,
+      replication,
+      estimator,
+      horizon
+    ) |>
+    dplyr::summarise(
+      coverage = if (any(success)) {
+        mean(
+          absolute_error[success] <=
+            current_half_width
+        )
+      } else {
+        NA_real_
+      },
+      n_origins = dplyr::n(),
+      n_success = sum(success),
+      success_rate = mean(success),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(
+      half_width = current_half_width,
+      total_width = 2 * current_half_width
+    )
+}
+
+forecast_coverage_by_replication <-
+  dplyr::bind_rows(coverage_replication_list) |>
+  dplyr::arrange(
+    match(dgp, dgp_names),
+    sample_size,
+    replication,
+    match(estimator, estimator_names),
+    horizon,
+    half_width
+  )
+
+forecast_coverage_summary <-
+  forecast_coverage_by_replication |>
+  dplyr::group_by(
+    dgp,
+    sample_size,
+    estimator,
+    horizon,
+    half_width,
+    total_width
+  ) |>
+  dplyr::summarise(
+    mcse = mcse_from_replications(coverage),
+    mean_coverage = if (any(is.finite(coverage))) {
+      mean(coverage[is.finite(coverage)])
+    } else {
+      NA_real_
+    },
+    n_replications = dplyr::n(),
+    n_replications_available =
+      sum(is.finite(coverage)),
+    n_forecasts = sum(n_origins),
+    n_successful_forecasts = sum(n_success),
+    success_rate =
+      n_successful_forecasts / n_forecasts,
     .groups = "drop"
   ) |>
   dplyr::mutate(
-    dgp = factor(
-      dgp,
-      levels = dgp_names
-    ),
-    sample_size = factor(
-      sample_size,
-      levels = sample_sizes
-    ),
-    estimator = factor(
-      estimator,
-      levels = estimator_names
-    )
+    # Monte Carlo uncertainty for the simulated average coverage;
+    # these are not forecast intervals or estimator confidence bands.
+    mc_lower = mean_coverage - 1.96 * mcse,
+    mc_upper = mean_coverage + 1.96 * mcse
+  ) |>
+  dplyr::arrange(
+    match(dgp, dgp_names),
+    sample_size,
+    match(estimator, estimator_names),
+    horizon,
+    half_width
   )
 
 
-average_forecast_plot <-
-  ggplot2::ggplot(
-    average_forecast_data,
-    ggplot2::aes(
-      x = horizon,
-      y = average_forecast,
-      color = estimator,
-      linetype = estimator,
-      group = estimator
-    )
-  ) +
-  ggplot2::geom_line(
-    linewidth = 0.8
-  ) +
-  ggplot2::geom_point(
-    size = 1.8
-  ) +
-  ggplot2::facet_grid(
-    rows = ggplot2::vars(dgp),
-    cols = ggplot2::vars(sample_size),
-    scales = "free_y"
-  ) +
-  ggplot2::scale_x_continuous(
-    breaks = horizons
-  ) +
-  ggplot2::labs(
-    x = "Horizon",
-    y = "Average forecast",
-    color = "Estimator",
-    linetype = "Estimator"
-  ) +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
-
-
-# Paired forecast-loss diagnostics ----
+# Paired Modal-LP coverage comparisons ----
 #
-# Because all estimators forecast the same realization at the same
-# origin, compare losses within the same forecast observation.
-#
-# Squared loss benchmark: Mean LP
-# Absolute loss benchmark: Median LP
+# Pair forecasts at the event level. Each comparison uses only events
+# for which Modal LP and its comparator both produced valid forecasts.
 
-
-forecast_pair_data <-
-  forecast_results_raw |>
-  dplyr::mutate(
-    success =
-      is.na(failure) &
-      is.finite(forecast) &
-      is.finite(realized),
-    estimator_key = dplyr::case_when(
-      estimator == "Mean LP" ~ "mean_lp",
-      estimator == "Median LP" ~ "median_lp",
-      estimator == "Modal LP" ~ "modal_lp",
-      estimator == "VAR" ~ "var"
+paired_event_data <-
+  forecast_evaluation_data |>
+  dplyr::filter(
+    estimator %in% c(
+      "Mean LP",
+      "Median LP",
+      "Modal LP"
     )
   ) |>
-  dplyr::filter(success) |>
+  dplyr::mutate(
+    estimator_key = dplyr::case_when(
+      estimator == "Mean LP" ~ "mean",
+      estimator == "Median LP" ~ "median",
+      estimator == "Modal LP" ~ "modal"
+    )
+  ) |>
   dplyr::select(
     dgp,
     sample_size,
@@ -1378,393 +1373,341 @@ forecast_pair_data <-
     target_time,
     horizon,
     estimator_key,
-    squared_error,
-    absolute_error
+    absolute_error,
+    success
   ) |>
   tidyr::pivot_wider(
     names_from = estimator_key,
-    values_from = c(
-      squared_error,
-      absolute_error
-    ),
+    values_from = c(absolute_error, success),
     names_sep = "__"
   )
 
-
-# Paired squared-loss differences relative to Mean LP ----
-
-paired_mse_by_replication <-
+paired_event_comparisons <-
   dplyr::bind_rows(
-    
-    forecast_pair_data |>
+    paired_event_data |>
       dplyr::transmute(
         dgp,
         sample_size,
         replication,
         forecast_origin,
+        target_time,
         horizon,
-        estimator = "Median LP",
-        loss_difference =
-          squared_error__median_lp -
-          squared_error__mean_lp
+        comparison = "Modal - Mean",
+        modal_absolute_error = absolute_error__modal,
+        comparator_absolute_error =
+          absolute_error__mean,
+        common_success =
+          dplyr::coalesce(success__modal, FALSE) &
+          dplyr::coalesce(success__mean, FALSE)
       ),
-    
-    forecast_pair_data |>
+    paired_event_data |>
       dplyr::transmute(
         dgp,
         sample_size,
         replication,
         forecast_origin,
+        target_time,
         horizon,
-        estimator = "Modal LP",
-        loss_difference =
-          squared_error__modal_lp -
-          squared_error__mean_lp
-      ),
-    
-    forecast_pair_data |>
-      dplyr::transmute(
-        dgp,
-        sample_size,
-        replication,
-        forecast_origin,
-        horizon,
-        estimator = "VAR",
-        loss_difference =
-          squared_error__var -
-          squared_error__mean_lp
+        comparison = "Modal - Median",
+        modal_absolute_error = absolute_error__modal,
+        comparator_absolute_error =
+          absolute_error__median,
+        common_success =
+          dplyr::coalesce(success__modal, FALSE) &
+          dplyr::coalesce(success__median, FALSE)
       )
-  ) |>
+  )
+
+paired_common_success_counts <-
+  paired_event_comparisons |>
   dplyr::group_by(
     dgp,
     sample_size,
     replication,
-    estimator,
-    horizon
+    horizon,
+    comparison
   ) |>
   dplyr::summarise(
-    mean_loss_difference =
-      mean(loss_difference),
+    expected_n_common_success =
+      sum(common_success),
     .groups = "drop"
   )
 
+paired_replication_list <- vector(
+  "list",
+  length(half_widths)
+)
 
-paired_mse_summary <-
-  paired_mse_by_replication |>
-  dplyr::group_by(
-    dgp,
-    sample_size,
-    estimator,
-    horizon
-  ) |>
-  dplyr::summarise(
-    mean_loss_difference =
-      mean(mean_loss_difference),
-    mcse =
-      stats::sd(mean_loss_difference) /
-      sqrt(dplyr::n()),
-    n_replications = dplyr::n(),
-    .groups = "drop"
-  ) |>
-  dplyr::mutate(
-    lower =
-      mean_loss_difference -
-      1.96 * mcse,
-    upper =
-      mean_loss_difference +
-      1.96 * mcse,
-    dgp = factor(
+for (width_index in seq_along(half_widths)) {
+  current_half_width <- half_widths[width_index]
+  
+  paired_replication_list[[width_index]] <-
+    paired_event_comparisons |>
+    dplyr::mutate(
+      modal_hit =
+        common_success &
+        modal_absolute_error <= current_half_width,
+      comparator_hit =
+        common_success &
+        comparator_absolute_error <= current_half_width
+    ) |>
+    dplyr::group_by(
       dgp,
-      levels = dgp_names
-    ),
-    sample_size = factor(
       sample_size,
-      levels = sample_sizes
+      replication,
+      horizon,
+      comparison
+    ) |>
+    dplyr::summarise(
+      mean_coverage_difference =
+        if (any(common_success)) {
+          mean(
+            as.numeric(modal_hit[common_success]) -
+              as.numeric(
+                comparator_hit[common_success]
+              )
+          )
+        } else {
+          NA_real_
+        },
+      modal_coverage = if (any(common_success)) {
+        mean(modal_hit[common_success])
+      } else {
+        NA_real_
+      },
+      comparator_coverage = if (any(common_success)) {
+        mean(comparator_hit[common_success])
+      } else {
+        NA_real_
+      },
+      n_events = dplyr::n(),
+      n_common_success = sum(common_success),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(
+      half_width = current_half_width,
+      total_width = 2 * current_half_width
     )
-  )
+}
 
-
-paired_mse_plot <-
-  ggplot2::ggplot(
-    paired_mse_summary,
-    ggplot2::aes(
-      x = horizon,
-      y = mean_loss_difference,
-      color = estimator,
-      linetype = estimator,
-      group = estimator
-    )
-  ) +
-  ggplot2::geom_hline(
-    yintercept = 0,
-    linewidth = 0.4
-  ) +
-  ggplot2::geom_errorbar(
-    ggplot2::aes(
-      ymin = lower,
-      ymax = upper
-    ),
-    width = 0.4,
-    linewidth = 0.4
-  ) +
-  ggplot2::geom_line(
-    linewidth = 0.8
-  ) +
-  ggplot2::geom_point(
-    size = 1.8
-  ) +
-  ggplot2::facet_grid(
-    rows = ggplot2::vars(dgp),
-    cols = ggplot2::vars(sample_size),
-    scales = "free_y"
-  ) +
-  ggplot2::scale_x_continuous(
-    breaks = horizons
-  ) +
-  ggplot2::labs(
-    x = "Horizon",
-    y = "Squared-loss difference vs Mean LP",
-    color = "Estimator",
-    linetype = "Estimator"
-  ) +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
-
-
-# Paired absolute-loss differences relative to Median LP ----
-
-paired_mae_by_replication <-
-  dplyr::bind_rows(
-    
-    forecast_pair_data |>
-      dplyr::transmute(
-        dgp,
-        sample_size,
-        replication,
-        forecast_origin,
-        horizon,
-        estimator = "Mean LP",
-        loss_difference =
-          absolute_error__mean_lp -
-          absolute_error__median_lp
-      ),
-    
-    forecast_pair_data |>
-      dplyr::transmute(
-        dgp,
-        sample_size,
-        replication,
-        forecast_origin,
-        horizon,
-        estimator = "Modal LP",
-        loss_difference =
-          absolute_error__modal_lp -
-          absolute_error__median_lp
-      ),
-    
-    forecast_pair_data |>
-      dplyr::transmute(
-        dgp,
-        sample_size,
-        replication,
-        forecast_origin,
-        horizon,
-        estimator = "VAR",
-        loss_difference =
-          absolute_error__var -
-          absolute_error__median_lp
-      )
-  ) |>
-  dplyr::group_by(
-    dgp,
+paired_coverage_by_replication <-
+  dplyr::bind_rows(paired_replication_list) |>
+  dplyr::arrange(
+    match(dgp, dgp_names),
     sample_size,
     replication,
-    estimator,
-    horizon
-  ) |>
-  dplyr::summarise(
-    mean_loss_difference =
-      mean(loss_difference),
-    .groups = "drop"
+    match(
+      comparison,
+      c("Modal - Mean", "Modal - Median")
+    ),
+    horizon,
+    half_width
   )
 
-
-paired_mae_summary <-
-  paired_mae_by_replication |>
+paired_coverage_summary <-
+  paired_coverage_by_replication |>
   dplyr::group_by(
     dgp,
     sample_size,
-    estimator,
-    horizon
+    comparison,
+    horizon,
+    half_width,
+    total_width
   ) |>
   dplyr::summarise(
-    mean_loss_difference =
-      mean(mean_loss_difference),
-    mcse =
-      stats::sd(mean_loss_difference) /
-      sqrt(dplyr::n()),
+    mcse = mcse_from_replications(
+      mean_coverage_difference
+    ),
+    mean_difference =
+      if (any(is.finite(mean_coverage_difference))) {
+        mean(
+          mean_coverage_difference[
+            is.finite(mean_coverage_difference)
+          ]
+        )
+      } else {
+        NA_real_
+      },
+    mean_modal_coverage =
+      if (any(is.finite(modal_coverage))) {
+        mean(modal_coverage[is.finite(modal_coverage)])
+      } else {
+        NA_real_
+      },
+    mean_comparator_coverage =
+      if (any(is.finite(comparator_coverage))) {
+        mean(
+          comparator_coverage[
+            is.finite(comparator_coverage)
+          ]
+        )
+      } else {
+        NA_real_
+      },
     n_replications = dplyr::n(),
+    n_replications_available =
+      sum(is.finite(mean_coverage_difference)),
+    n_paired_forecasts = sum(n_common_success),
     .groups = "drop"
   ) |>
+  dplyr::rename(
+    mean_coverage_difference = mean_difference
+  ) |>
   dplyr::mutate(
-    lower =
-      mean_loss_difference -
-      1.96 * mcse,
-    upper =
-      mean_loss_difference +
-      1.96 * mcse,
-    dgp = factor(
-      dgp,
-      levels = dgp_names
+    # Monte Carlo uncertainty for the paired simulated average.
+    mc_lower =
+      mean_coverage_difference - 1.96 * mcse,
+    mc_upper =
+      mean_coverage_difference + 1.96 * mcse
+  ) |>
+  dplyr::arrange(
+    match(dgp, dgp_names),
+    sample_size,
+    match(
+      comparison,
+      c("Modal - Mean", "Modal - Median")
     ),
-    sample_size = factor(
-      sample_size,
-      levels = sample_sizes
-    )
+    horizon,
+    half_width
   )
 
 
-paired_mae_plot <-
-  ggplot2::ggplot(
-    paired_mae_summary,
-    ggplot2::aes(
-      x = horizon,
-      y = mean_loss_difference,
-      color = estimator,
-      linetype = estimator,
-      group = estimator
-    )
-  ) +
-  ggplot2::geom_hline(
-    yintercept = 0,
-    linewidth = 0.4
-  ) +
-  ggplot2::geom_errorbar(
-    ggplot2::aes(
-      ymin = lower,
-      ymax = upper
-    ),
-    width = 0.4,
-    linewidth = 0.4
-  ) +
-  ggplot2::geom_line(
-    linewidth = 0.8
-  ) +
-  ggplot2::geom_point(
-    size = 1.8
-  ) +
-  ggplot2::facet_grid(
-    rows = ggplot2::vars(dgp),
-    cols = ggplot2::vars(sample_size),
-    scales = "free_y"
-  ) +
-  ggplot2::scale_x_continuous(
-    breaks = horizons
-  ) +
-  ggplot2::labs(
-    x = "Horizon",
-    y = "Absolute-loss difference vs Median LP",
-    color = "Estimator",
-    linetype = "Estimator"
-  ) +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
+# DGP-3 disaster-path coverage diagnostic ----
 
-
-# Disaster-path diagnostics ----
-#
-# Split forecasts according to whether at least one disaster
-# occurs after the forecast origin and through the target date.
-
-disaster_path_data <-
-  forecast_results_raw |>
+disaster_forecast_data <-
+  forecast_evaluation_data |>
   dplyr::mutate(
-    success =
-      is.na(failure) &
-      is.finite(forecast) &
-      is.finite(realized)
+    disaster_path = dplyr::case_when(
+      n_disasters_to_target == 0 ~
+        "No disaster",
+      n_disasters_to_target > 0 ~
+        "At least one disaster",
+      TRUE ~ NA_character_
+    )
   ) |>
   dplyr::filter(
     dgp == "disaster",
-    success,
-    !is.na(n_disasters_to_target)
-  ) |>
-  dplyr::mutate(
-    disaster_path = dplyr::if_else(
-      n_disasters_to_target > 0,
-      "At least one disaster",
-      "No disaster"
+    !is.na(disaster_path)
+  )
+
+disaster_coverage_replication_list <- vector(
+  "list",
+  length(half_widths)
+)
+
+for (width_index in seq_along(half_widths)) {
+  current_half_width <- half_widths[width_index]
+  
+  disaster_coverage_replication_list[[width_index]] <-
+    disaster_forecast_data |>
+    dplyr::group_by(
+      dgp,
+      sample_size,
+      replication,
+      estimator,
+      horizon,
+      disaster_path
+    ) |>
+    dplyr::summarise(
+      coverage = if (any(success)) {
+        mean(
+          absolute_error[success] <=
+            current_half_width
+        )
+      } else {
+        NA_real_
+      },
+      n_event_forecasts = dplyr::n(),
+      n_success = sum(success),
+      success_rate = mean(success),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(
+      half_width = current_half_width,
+      total_width = 2 * current_half_width
     )
-  )
+}
 
-
-# Counts use Mean LP only so the same forecast event is not
-# counted four times simply because four estimators forecast it.
-
-disaster_path_counts <-
-  disaster_path_data |>
-  dplyr::filter(
-    estimator == "Mean LP"
+disaster_coverage_by_replication <-
+  dplyr::bind_rows(
+    disaster_coverage_replication_list
   ) |>
-  dplyr::count(
-    sample_size,
-    horizon,
-    disaster_path,
-    name = "n_forecasts"
-  )
-
-
-disaster_path_by_replication <-
-  disaster_path_data |>
-  dplyr::group_by(
+  dplyr::arrange(
     sample_size,
     replication,
-    estimator,
+    match(estimator, estimator_names),
     horizon,
-    disaster_path
-  ) |>
-  dplyr::summarise(
-    mse = mean(squared_error),
-    mae = mean(absolute_error),
-    n_origins = dplyr::n(),
-    .groups = "drop"
+    match(
+      disaster_path,
+      c("No disaster", "At least one disaster")
+    ),
+    half_width
   )
 
-
-disaster_path_summary <-
-  disaster_path_by_replication |>
+disaster_coverage_summary <-
+  disaster_coverage_by_replication |>
   dplyr::group_by(
+    dgp,
     sample_size,
     estimator,
     horizon,
-    disaster_path
+    disaster_path,
+    half_width,
+    total_width
   ) |>
   dplyr::summarise(
-    rmse = sqrt(
-      mean(mse)
-    ),
-    mae = mean(mae),
-    n_replications_with_event =
-      dplyr::n(),
-    n_event_forecasts =
-      sum(n_origins),
+    mcse = mcse_from_replications(coverage),
+    mean_coverage = if (any(is.finite(coverage))) {
+      mean(coverage[is.finite(coverage)])
+    } else {
+      NA_real_
+    },
+    n_replications_with_event = dplyr::n(),
+    n_replications_available =
+      sum(is.finite(coverage)),
+    n_event_forecasts = sum(n_event_forecasts),
+    n_successful_event_forecasts = sum(n_success),
+    success_rate =
+      n_successful_event_forecasts /
+      n_event_forecasts,
     .groups = "drop"
   ) |>
   dplyr::mutate(
+    mc_lower = mean_coverage - 1.96 * mcse,
+    mc_upper = mean_coverage + 1.96 * mcse
+  ) |>
+  dplyr::arrange(
+    sample_size,
+    match(estimator, estimator_names),
+    horizon,
+    match(
+      disaster_path,
+      c("No disaster", "At least one disaster")
+    ),
+    half_width
+  )
+
+
+# Plot data ----
+
+dgp_labels <- c(
+  gaussian = "Gaussian",
+  skewed = "Skewed lognormal",
+  disaster = "Disaster mixture",
+  rich_state = "Rich state"
+)
+
+average_forecast_plot_data <-
+  average_forecast_summary |>
+  dplyr::mutate(
+    dgp = factor(
+      dgp,
+      levels = dgp_names,
+      labels = unname(dgp_labels[dgp_names])
+    ),
     sample_size = factor(
       sample_size,
       levels = sample_sizes
-    ),
-    disaster_path = factor(
-      disaster_path,
-      levels = c(
-        "No disaster",
-        "At least one disaster"
-      )
     ),
     estimator = factor(
       estimator,
@@ -1772,195 +1715,681 @@ disaster_path_summary <-
     )
   )
 
+forecast_coverage_plot_data <-
+  forecast_coverage_summary |>
+  dplyr::mutate(
+    dgp = factor(
+      dgp,
+      levels = dgp_names,
+      labels = unname(dgp_labels[dgp_names])
+    ),
+    horizon = factor(horizon, levels = horizons),
+    estimator = factor(
+      estimator,
+      levels = estimator_names
+    )
+  )
 
-disaster_path_rmse_plot <-
+paired_coverage_plot_data <-
+  paired_coverage_summary |>
+  dplyr::mutate(
+    dgp = factor(
+      dgp,
+      levels = dgp_names,
+      labels = unname(dgp_labels[dgp_names])
+    ),
+    horizon = factor(horizon, levels = horizons),
+    comparison = factor(
+      comparison,
+      levels = c("Modal - Mean", "Modal - Median")
+    )
+  )
+
+disaster_coverage_plot_data <-
+  disaster_coverage_summary |>
+  dplyr::mutate(
+    horizon = factor(horizon, levels = horizons),
+    estimator = factor(
+      estimator,
+      levels = estimator_names
+    ),
+    disaster_path = factor(
+      disaster_path,
+      levels = c(
+        "No disaster",
+        "At least one disaster"
+      )
+    )
+  )
+
+
+# Figure 1: average issued forecasts ----
+
+average_forecast_plot <-
   ggplot2::ggplot(
-    disaster_path_summary,
+    average_forecast_plot_data,
     ggplot2::aes(
       x = horizon,
-      y = rmse,
+      y = average_forecast,
       color = estimator,
       linetype = estimator,
       group = estimator
     )
   ) +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(ymin = mc_lower, ymax = mc_upper),
+    width = 0.35,
+    linewidth = 0.35,
+    alpha = 0.65,
+    na.rm = TRUE
+  ) +
   ggplot2::geom_line(
-    linewidth = 0.8
+    linewidth = 0.8,
+    na.rm = TRUE
   ) +
   ggplot2::geom_point(
-    size = 1.8
+    size = 1.8,
+    na.rm = TRUE
   ) +
   ggplot2::facet_grid(
-    rows = ggplot2::vars(disaster_path),
+    rows = ggplot2::vars(dgp),
     cols = ggplot2::vars(sample_size),
     scales = "free_y"
   ) +
-  ggplot2::scale_x_continuous(
-    breaks = horizons
-  ) +
+  ggplot2::scale_x_continuous(breaks = horizons) +
   ggplot2::labs(
     x = "Horizon",
-    y = "Conditional RMSE",
+    y = "Average issued forecast",
     color = "Estimator",
-    linetype = "Estimator"
-  ) +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
-
-
-disaster_path_mae_plot <-
-  ggplot2::ggplot(
-    disaster_path_summary,
-    ggplot2::aes(
-      x = horizon,
-      y = mae,
-      color = estimator,
-      linetype = estimator,
-      group = estimator
+    linetype = "Estimator",
+    caption = paste(
+      "Vertical bars show +/- 1.96 Monte Carlo SE",
+      "based on replication-level averages."
     )
   ) +
-  ggplot2::geom_line(
-    linewidth = 0.8
-  ) +
-  ggplot2::geom_point(
-    size = 1.8
-  ) +
-  ggplot2::facet_grid(
-    rows = ggplot2::vars(disaster_path),
-    cols = ggplot2::vars(sample_size),
-    scales = "free_y"
-  ) +
-  ggplot2::scale_x_continuous(
-    breaks = horizons
-  ) +
-  ggplot2::labs(
-    x = "Horizon",
-    y = "Conditional MAE",
-    color = "Estimator",
-    linetype = "Estimator"
-  ) +
   ggplot2::theme_minimal() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
+  ggplot2::theme(legend.position = "bottom")
 
+
+# Figure 2: absolute fixed-width coverage ----
+#
+# Create one faceted plot per sample size. This retains all sample
+# sizes without placing twelve estimator/sample-size curves together.
+
+forecast_coverage_plots <- lapply(
+  sample_sizes,
+  function(current_sample_size) {
+    current_plot_data <-
+      forecast_coverage_plot_data |>
+      dplyr::filter(
+        sample_size == current_sample_size
+      )
+    
+    ggplot2::ggplot(
+      current_plot_data,
+      ggplot2::aes(
+        x = half_width,
+        y = mean_coverage,
+        color = estimator,
+        linetype = estimator,
+        group = estimator
+      )
+    ) +
+      ggplot2::geom_errorbar(
+        ggplot2::aes(ymin = mc_lower, ymax = mc_upper),
+        width = 0.03,
+        linewidth = 0.3,
+        alpha = 0.60,
+        na.rm = TRUE
+      ) +
+      ggplot2::geom_line(
+        linewidth = 0.8,
+        na.rm = TRUE
+      ) +
+      ggplot2::geom_point(
+        size = 1.6,
+        na.rm = TRUE
+      ) +
+      ggplot2::facet_grid(
+        rows = ggplot2::vars(dgp),
+        cols = ggplot2::vars(horizon)
+      ) +
+      ggplot2::scale_x_continuous(breaks = half_widths) +
+      ggplot2::scale_y_continuous(
+        labels = function(x) {
+          paste0(round(100 * x), "%")
+        }
+      ) +
+      ggplot2::coord_cartesian(ylim = c(0, 1)) +
+      ggplot2::labs(
+        title = paste0(
+          "Fixed-width forecast coverage: T = ",
+          current_sample_size
+        ),
+        subtitle =
+          "Half-width a; total interval width is 2a",
+        x = "Interval half-width",
+        y = "Coverage",
+        color = "Estimator",
+        linetype = "Estimator",
+        caption = paste(
+          "Vertical bars show +/- 1.96 Monte Carlo SE",
+          "based on replication-level coverage rates."
+        )
+      ) +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(
+        legend.position = "bottom",
+        axis.text.x = ggplot2::element_text(
+          angle = 45,
+          hjust = 1
+        )
+      )
+  }
+)
+
+names(forecast_coverage_plots) <-
+  paste0("T", sample_sizes)
+
+
+# Figure 3: paired Modal coverage differences ----
+
+paired_coverage_plots <- lapply(
+  sample_sizes,
+  function(current_sample_size) {
+    current_plot_data <-
+      paired_coverage_plot_data |>
+      dplyr::filter(
+        sample_size == current_sample_size
+      )
+    
+    ggplot2::ggplot(
+      current_plot_data,
+      ggplot2::aes(
+        x = half_width,
+        y = mean_coverage_difference,
+        color = comparison,
+        linetype = comparison,
+        group = comparison
+      )
+    ) +
+      ggplot2::geom_hline(
+        yintercept = 0,
+        linewidth = 0.4
+      ) +
+      ggplot2::geom_errorbar(
+        ggplot2::aes(ymin = mc_lower, ymax = mc_upper),
+        width = 0.03,
+        linewidth = 0.3,
+        alpha = 0.60,
+        na.rm = TRUE
+      ) +
+      ggplot2::geom_line(
+        linewidth = 0.8,
+        na.rm = TRUE
+      ) +
+      ggplot2::geom_point(
+        size = 1.6,
+        na.rm = TRUE
+      ) +
+      ggplot2::facet_grid(
+        rows = ggplot2::vars(dgp),
+        cols = ggplot2::vars(horizon),
+        scales = "free_y"
+      ) +
+      ggplot2::scale_x_continuous(breaks = half_widths) +
+      ggplot2::scale_y_continuous(
+        labels = function(x) {
+          paste0(round(100 * x, 1), " pp")
+        }
+      ) +
+      ggplot2::labs(
+        title = paste0(
+          "Paired Modal-LP coverage differences: T = ",
+          current_sample_size
+        ),
+        subtitle = paste(
+          "Positive values favor Modal LP;",
+          "the ranking is an empirical question"
+        ),
+        x = "Interval half-width",
+        y = "Paired coverage difference",
+        color = "Comparison",
+        linetype = "Comparison",
+        caption = paste(
+          "Comparisons use pair-specific common-success events.",
+          "Vertical bars show +/- 1.96 Monte Carlo SE."
+        )
+      ) +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(
+        legend.position = "bottom",
+        axis.text.x = ggplot2::element_text(
+          angle = 45,
+          hjust = 1
+        )
+      )
+  }
+)
+
+names(paired_coverage_plots) <-
+  paste0("T", sample_sizes)
+
+
+# Small DGP-3 diagnostic: disaster versus no-disaster paths ----
+
+disaster_coverage_plots <- lapply(
+  sample_sizes,
+  function(current_sample_size) {
+    current_plot_data <-
+      disaster_coverage_plot_data |>
+      dplyr::filter(
+        sample_size == current_sample_size
+      )
+    
+    ggplot2::ggplot(
+      current_plot_data,
+      ggplot2::aes(
+        x = half_width,
+        y = mean_coverage,
+        color = estimator,
+        linetype = estimator,
+        group = estimator
+      )
+    ) +
+      ggplot2::geom_line(
+        linewidth = 0.8,
+        na.rm = TRUE
+      ) +
+      ggplot2::geom_point(
+        size = 1.6,
+        na.rm = TRUE
+      ) +
+      ggplot2::facet_grid(
+        rows = ggplot2::vars(disaster_path),
+        cols = ggplot2::vars(horizon)
+      ) +
+      ggplot2::scale_x_continuous(breaks = half_widths) +
+      ggplot2::scale_y_continuous(
+        labels = function(x) {
+          paste0(round(100 * x), "%")
+        }
+      ) +
+      ggplot2::coord_cartesian(ylim = c(0, 1)) +
+      ggplot2::labs(
+        title = paste0(
+          "Disaster-path coverage diagnostic: T = ",
+          current_sample_size
+        ),
+        subtitle =
+          "See disaster_coverage_summary for event counts",
+        x = "Interval half-width",
+        y = "Conditional coverage",
+        color = "Estimator",
+        linetype = "Estimator"
+      ) +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(
+        legend.position = "bottom",
+        axis.text.x = ggplot2::element_text(
+          angle = 45,
+          hjust = 1
+        )
+      )
+  }
+)
+
+names(disaster_coverage_plots) <-
+  paste0("T", sample_sizes)
 
 forecast_plots <- list(
-  rmse = forecast_rmse_plot,
-  mae = forecast_mae_plot,
-  mean_forecast_error = forecast_error_plot,
-  success_rate = forecast_success_plot,
-  average_forecast = average_forecast_plot,
-  paired_mse_difference = paired_mse_plot,
-  paired_mae_difference = paired_mae_plot,
-  disaster_path_rmse = disaster_path_rmse_plot,
-  disaster_path_mae = disaster_path_mae_plot
-)
-# Save results ----
-
-dir.create(
-  "results",
-  showWarnings = FALSE
+  average_issued_forecasts = average_forecast_plot,
+  fixed_width_coverage = forecast_coverage_plots,
+  paired_modal_coverage_differences =
+    paired_coverage_plots,
+  disaster_coverage_diagnostic =
+    disaster_coverage_plots
 )
 
-run_label <- paste0(
-  "R",
-  n_replications,
-  "_O",
-  n_forecast_origins,
-  "_h",
-  paste(
-    horizons,
-    collapse = "-"
-  )
-)
 
-forecast_run_settings <- list(
-  dgp_names = dgp_names,
-  dgp_parameters = dgp_parameters,
-  sample_sizes = sample_sizes,
-  horizons = horizons,
-  n_forecast_origins =
-    n_forecast_origins,
-  n_replications = n_replications,
-  bw_constant = bw_constant,
-  start_quantiles = start_quantiles,
-  estimation_cutoff =
-    estimation_cutoff,
-  simulation_size = simulation_size,
-  mc_seed = mc_seed
-)
+# Final smoke checks before saving derived output ----
 
-saveRDS(
-  forecast_results_raw,
-  file.path(
-    "results",
-    paste0(
-      "forecast_results_raw_",
-      run_label,
-      ".rds"
+# 1. Coverage must be weakly increasing in half-width within every
+# replication-level evaluation cell.
+
+coverage_monotonicity_failures <-
+  forecast_coverage_by_replication |>
+  dplyr::filter(is.finite(coverage)) |>
+  dplyr::arrange(
+    dgp,
+    sample_size,
+    replication,
+    estimator,
+    horizon,
+    half_width
+  ) |>
+  dplyr::group_by(
+    dgp,
+    sample_size,
+    replication,
+    estimator,
+    horizon
+  ) |>
+  dplyr::summarise(
+    monotone = all(diff(coverage) >= -1e-12),
+    .groups = "drop"
+  ) |>
+  dplyr::filter(!monotone)
+
+disaster_monotonicity_failures <-
+  disaster_coverage_by_replication |>
+  dplyr::filter(is.finite(coverage)) |>
+  dplyr::arrange(
+    dgp,
+    sample_size,
+    replication,
+    estimator,
+    horizon,
+    disaster_path,
+    half_width
+  ) |>
+  dplyr::group_by(
+    dgp,
+    sample_size,
+    replication,
+    estimator,
+    horizon,
+    disaster_path
+  ) |>
+  dplyr::summarise(
+    monotone = all(diff(coverage) >= -1e-12),
+    .groups = "drop"
+  ) |>
+  dplyr::filter(!monotone)
+
+if (
+  nrow(coverage_monotonicity_failures) > 0 ||
+  nrow(disaster_monotonicity_failures) > 0
+) {
+  stop(
+    paste(
+      "Coverage is not weakly increasing in",
+      "half-width in at least one cell."
     )
   )
-)
+}
 
-saveRDS(
-  modal_forecast_fit_diagnostics,
-  file.path(
-    "results",
-    paste0(
-      "modal_forecast_fit_diagnostics_",
-      run_label,
-      ".rds"
+
+# 2. Stored paired counts must equal independently constructed
+# pair-specific common-success counts.
+
+paired_count_check <-
+  paired_coverage_by_replication |>
+  dplyr::select(
+    dgp,
+    sample_size,
+    replication,
+    horizon,
+    comparison,
+    half_width,
+    n_common_success
+  ) |>
+  dplyr::left_join(
+    paired_common_success_counts,
+    by = c(
+      "dgp",
+      "sample_size",
+      "replication",
+      "horizon",
+      "comparison"
+    )
+  ) |>
+  dplyr::filter(
+    is.na(expected_n_common_success) |
+      n_common_success != expected_n_common_success
+  )
+
+if (nrow(paired_count_check) > 0) {
+  stop(
+    paste(
+      "At least one paired coverage cell does not",
+      "use the correct common-success observations."
     )
   )
+}
+
+
+# 3. The raw table must retain one row per original issued forecast
+# and must not acquire width-indexed analysis columns.
+
+if (nrow(forecast_results_raw) != n_forecast_results) {
+  stop(
+    "The raw forecast table changed size during analysis."
+  )
+}
+
+if (
+  any(
+    c(
+      "half_width",
+      "total_width",
+      "coverage",
+      "hit"
+    ) %in% names(forecast_results_raw)
+  )
+) {
+  stop(
+    "Width-indexed columns were added to forecast_results_raw."
+  )
+}
+
+
+# 4. All estimators must face the same realized outcome for each
+# forecast event.
+
+realized_outcome_check <-
+  forecast_results_raw |>
+  dplyr::group_by(
+    dgp,
+    sample_size,
+    replication,
+    forecast_origin,
+    target_time,
+    horizon
+  ) |>
+  dplyr::summarise(
+    n_realized_values = dplyr::n_distinct(realized),
+    n_estimators = dplyr::n_distinct(estimator),
+    .groups = "drop"
+  ) |>
+  dplyr::filter(
+    n_realized_values != 1 |
+      n_estimators != length(estimator_names)
+  )
+
+if (nrow(realized_outcome_check) > 0) {
+  stop(
+    paste(
+      "Realized outcomes or estimator counts disagree",
+      "within at least one forecast event."
+    )
+  )
+}
+
+
+# 5. DGP 3 must use the redesigned defaults.
+
+disaster_parameters <- dgp_parameters[["disaster"]]
+
+valid_disaster_probability <-
+  !is.null(disaster_parameters$disaster_probability) &&
+  isTRUE(
+    all.equal(
+      as.numeric(
+        disaster_parameters$disaster_probability
+      ),
+      0.05,
+      tolerance = 1e-12
+    )
+  )
+
+valid_disaster_size <-
+  !is.null(disaster_parameters$disaster_size) &&
+  isTRUE(
+    all.equal(
+      as.numeric(disaster_parameters$disaster_size),
+      7.5,
+      tolerance = 1e-12
+    )
+  )
+
+if (!valid_disaster_probability || !valid_disaster_size) {
+  stop(
+    paste(
+      "Stored DGP-3 parameters do not equal",
+      "disaster_probability = 0.05 and",
+      "disaster_size = 7.5."
+    )
+  )
+}
+
+
+# 6. Required outputs must be nonempty and width-indexed outputs must
+# contain exactly the six requested half-widths.
+
+required_output_objects <- list(
+  average_forecast_by_replication =
+    average_forecast_by_replication,
+  average_forecast_summary = average_forecast_summary,
+  forecast_coverage_by_replication =
+    forecast_coverage_by_replication,
+  forecast_coverage_summary = forecast_coverage_summary,
+  paired_coverage_by_replication =
+    paired_coverage_by_replication,
+  paired_coverage_summary = paired_coverage_summary,
+  disaster_coverage_by_replication =
+    disaster_coverage_by_replication,
+  disaster_coverage_summary = disaster_coverage_summary
 )
 
-saveRDS(
+empty_output_objects <- names(required_output_objects)[
+  vapply(
+    required_output_objects,
+    function(x) {
+      !is.data.frame(x) || nrow(x) == 0
+    },
+    logical(1)
+  )
+]
+
+if (length(empty_output_objects) > 0) {
+  stop(
+    paste(
+      "Required output objects are empty:",
+      paste(empty_output_objects, collapse = ", ")
+    )
+  )
+}
+
+width_indexed_objects <- list(
+  forecast_coverage_by_replication,
+  forecast_coverage_summary,
+  paired_coverage_by_replication,
+  paired_coverage_summary,
+  disaster_coverage_by_replication,
+  disaster_coverage_summary
+)
+
+valid_width_sets <- vapply(
+  width_indexed_objects,
+  function(x) {
+    setequal(
+      sort(unique(x$half_width)),
+      half_widths
+    )
+  },
+  logical(1)
+)
+
+if (!all(valid_width_sets)) {
+  stop(
+    paste(
+      "At least one width-indexed output does not",
+      "contain exactly the six requested half-widths."
+    )
+  )
+}
+
+if (
+  !setequal(
+    unique(paired_coverage_summary$comparison),
+    c("Modal - Mean", "Modal - Median")
+  )
+) {
+  stop(
+    "The paired output does not contain the requested comparisons."
+  )
+}
+
+
+# Save derived analysis objects ----
+
+save_run_object(
+  average_forecast_by_replication,
+  "average_forecast_by_replication"
+)
+
+save_run_object(
+  average_forecast_summary,
+  "average_forecast_summary"
+)
+
+save_run_object(
+  forecast_coverage_by_replication,
+  "forecast_coverage_by_replication"
+)
+
+save_run_object(
+  forecast_coverage_summary,
+  "forecast_coverage_summary"
+)
+
+save_run_object(
+  paired_coverage_by_replication,
+  "paired_coverage_by_replication"
+)
+
+save_run_object(
+  paired_coverage_summary,
+  "paired_coverage_summary"
+)
+
+save_run_object(
+  disaster_coverage_by_replication,
+  "disaster_coverage_by_replication"
+)
+
+save_run_object(
+  disaster_coverage_summary,
+  "disaster_coverage_summary"
+)
+
+save_run_object(
   forecast_scores_by_replication,
-  file.path(
-    "results",
-    paste0(
-      "forecast_scores_by_replication_",
-      run_label,
-      ".rds"
-    )
-  )
+  "forecast_scores_by_replication"
 )
 
-saveRDS(
+save_run_object(
   forecast_summary,
-  file.path(
-    "results",
-    paste0(
-      "forecast_summary_",
-      run_label,
-      ".rds"
-    )
-  )
+  "forecast_summary"
 )
 
-saveRDS(
-  forecast_run_settings,
-  file.path(
-    "results",
-    paste0(
-      "forecast_run_settings_",
-      run_label,
-      ".rds"
-    )
-  )
-)
-
-saveRDS(
+save_run_object(
   forecast_plots,
-  file.path(
-    "results",
-    paste0(
-      "forecast_plots_",
-      run_label,
-      ".rds"
-    )
-  )
+  "forecast_plots"
+)
+
+message(
+  "Forecast analysis complete. Run label: ",
+  run_label
 )

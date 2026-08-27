@@ -1353,8 +1353,14 @@ sensitivity_plots <- list(
 
 # save results ----
 
-dir.create(
+results_directory <- file.path(
   "results",
+  "sensitivity"
+)
+
+dir.create(
+  results_directory,
+  recursive = TRUE,
   showWarnings = FALSE
 )
 
@@ -1367,7 +1373,7 @@ run_label <- paste0(
 saveRDS(
   bandwidth_sensitivity_raw,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "bandwidth_sensitivity_raw_",
       run_label,
@@ -1379,7 +1385,7 @@ saveRDS(
 saveRDS(
   bandwidth_sensitivity_summary,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "bandwidth_sensitivity_summary_",
       run_label,
@@ -1391,7 +1397,7 @@ saveRDS(
 saveRDS(
   start_sensitivity_raw,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "start_sensitivity_raw_",
       run_label,
@@ -1403,7 +1409,7 @@ saveRDS(
 saveRDS(
   start_sensitivity_summary,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "start_sensitivity_summary_",
       run_label,
@@ -1415,7 +1421,7 @@ saveRDS(
 saveRDS(
   start_diagnostics_long,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "start_diagnostics_long_",
       run_label,
@@ -1427,7 +1433,7 @@ saveRDS(
 saveRDS(
   start_diagnostics_summary,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "start_diagnostics_summary_",
       run_label,
@@ -1439,7 +1445,7 @@ saveRDS(
 saveRDS(
   sensitivity_plots,
   file.path(
-    "results",
+    results_directory,
     paste0(
       "sensitivity_plots_",
       run_label,
