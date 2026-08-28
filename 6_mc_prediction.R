@@ -321,6 +321,8 @@ dgp_parameters <- vector(
 names(dgp_parameters) <- dgp_names
 
 
+
+
 # Forecasting Monte Carlo ----
 
 set.seed(mc_seed)
@@ -971,6 +973,7 @@ if (forecast_row != n_forecast_results + 1) {
     )
   )
 }
+
 
 # Fixed-width forecast-coverage settings ----
 
@@ -1688,6 +1691,7 @@ disaster_coverage_summary <-
   )
 
 
+
 # Plot data ----
 
 dgp_labels <- c(
@@ -1763,7 +1767,8 @@ disaster_coverage_plot_data <-
   )
 
 
-# Figure 1: average issued forecasts ----
+
+# Plot 1: average issued forecasts ----
 
 average_forecast_plot <-
   ggplot2::ggplot(
@@ -1811,7 +1816,7 @@ average_forecast_plot <-
   ggplot2::theme(legend.position = "bottom")
 
 
-# Figure 2: absolute fixed-width coverage ----
+# Plot 2: absolute fixed-width coverage ----
 #
 # Create one faceted plot per sample size. This retains all sample
 # sizes without placing twelve estimator/sample-size curves together.
@@ -1892,7 +1897,7 @@ names(forecast_coverage_plots) <-
   paste0("T", sample_sizes)
 
 
-# Figure 3: paired Modal coverage differences ----
+# Plot 3: paired Modal coverage differences ----
 
 paired_coverage_plots <- lapply(
   sample_sizes,
@@ -1976,7 +1981,7 @@ names(paired_coverage_plots) <-
   paste0("T", sample_sizes)
 
 
-# Small DGP-3 diagnostic: disaster versus no-disaster paths ----
+# Plot 4: disaster versus no-disaster paths ----
 
 disaster_coverage_plots <- lapply(
   sample_sizes,
@@ -2052,7 +2057,8 @@ forecast_plots <- list(
 )
 
 
-# Final smoke checks before saving derived output ----
+
+# Final checks before saving derived output ----
 
 # 1. Coverage must be weakly increasing in half-width within every
 # replication-level evaluation cell.
@@ -2332,7 +2338,7 @@ if (
 }
 
 
-# Save derived analysis objects ----
+# Save analysis objects ----
 
 save_run_object(
   average_forecast_by_replication,

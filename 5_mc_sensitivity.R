@@ -38,7 +38,8 @@ bw_constants <- c(
   2.4,
   3.0,
   3.6,
-  4.2
+  4.2,
+  6.4
 )
 
 baseline_bw_constant <- 1.6
@@ -392,7 +393,7 @@ for (replication in seq_len(n_replications)) {
   }
   
   if (
-    replication %% 25 == 0 ||
+    replication %% 5 == 0 ||
     replication == n_replications
   ) {
     message(
