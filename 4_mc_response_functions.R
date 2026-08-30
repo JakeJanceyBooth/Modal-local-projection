@@ -705,6 +705,25 @@ response_plot_data <-
       average_estimate + 1.96 * mcse
   )
 
+modal_results <- readRDS(
+  "results/responses/modal_results_R1000.rds"
+)
+
+mc_sd <- modal_results |>
+  filter(
+    dgp %in% c("gaussian", "skewed", "disaster"),
+    sample_size %in% c(250, 1000),
+    horizon %in% c(1, 5, 20)
+  ) |>
+  group_by(dgp, sample_size, horizon) |>
+  summarise(
+    mc_sd = sd(estimate, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(sample_size, horizon, dgp) |>
+  mutate(mc_sd = round(mc_sd,4))
+
+mc_sd
 
 # plot 1. RMSE overview ----
 
