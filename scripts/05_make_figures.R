@@ -6,7 +6,6 @@
 library(ggplot2)
 library(dplyr)
 
-
 # Paths and final saved results ------------------------------------------------
 
 dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
@@ -803,8 +802,7 @@ ggsave(
 )
 
 
-# Figure 4-specific comparison setup ------------------------------------
-
+# Figure 4: paired fixed-width coverage differences ----
 
 coverage_comparison_levels <- c(
   "Modal - Mean",
@@ -874,9 +872,6 @@ figure4_plot_data <- paired_coverage_summary |>
       mean_coverage_difference
   )
 
-# Interior ticks prevent labels from colliding across four-column facets.
-# All six saved half-width observations remain in the plotted lines.
-
 fixed_width_axis_breaks <- c(
   0.5,
   1.0,
@@ -903,8 +898,6 @@ figure4_horizons <- c(
   5,
   10
 )
-
-# Figure 4: paired fixed-width coverage differences ---------------------------
 
 figure4_paired_coverage_differences <- ggplot(
   data = figure4_plot_data,
@@ -1154,7 +1147,7 @@ ggsave(
   bg = "white"
 )
 
-# Paths and final saved results ------------------------------------------------
+# Paths and final saved results ----
 
 response_results_path <- file.path(
   "results", "responses", "response_plot_data_R1000.rds"
