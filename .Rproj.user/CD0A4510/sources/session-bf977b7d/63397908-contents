@@ -1,9 +1,10 @@
+
 # Finite-sample blocks-of-blocks bootstrap inference for Modal-LP.
 # The resampling unit is the completed, already aligned horizon-specific
 # regression row W_{t,h} = (y_{t+h}, x_t, z_t')'.
 
-source(file.path("R", "estimators.R"))
-source(file.path("R", "dgps.R"))
+source("1_estimators.R")
+source("2_dgps.R")
 
 # Experiment settings -----------------------------------------------------
 
@@ -27,8 +28,6 @@ horizons <- c(
 n_outer_replications <- 100
 n_bootstrap_replications <- 199
 
-min_bootstrap_success_rate <- 0.90
-
 confidence_level <- 0.95
 delta <- 1
 bw_constant <- 2.4
@@ -47,9 +46,12 @@ modal_max_iter <- 1000L
 simulation_seed_base <- 812301L
 bootstrap_seed_base <- 1700001L
 
-# Large response Monte Carlo used for bootstrap-SE calibration.
-response_mc_results_file <- 
-  file.path("results", "responses", "modal_results_R1000.rds")
+# Optional large-Monte-Carlo comparison from script 4.
+# The inference experiment does not depend on this file being present.
+response_mc_results_file <-
+  file.path("results", "modal_results_R1000.rds")
+
+response_mc_results_file <- NULL
 
 results_directory <- file.path("results", "inference")
 
@@ -257,14 +259,14 @@ fit_aligned_modal_regression <- function(
     }
   )
   
-  quantile_names <- paste0(
+  names(quantile_starts) <- paste0(
     "q",
-    100 * start_quantiles
+    format(
+      start_quantiles,
+      trim = TRUE,
+      scientific = FALSE
+    )
   )
-  
-  quantile_names[start_quantiles == 0.5] <- "median"
-  
-  names(quantile_starts) <- quantile_names
   
   starting_values <- c(
     list(ols = theta_ols),
@@ -680,8 +682,7 @@ for (
           }
           
           valid_interval <-
-            is.finite(bootstrap_success_rate) &&
-            bootstrap_success_rate >= min_bootstrap_success_rate
+            n_bootstrap_success >= 2L
           
           if (valid_interval) {
             bootstrap_se <- stats::sd(
@@ -712,7 +713,19 @@ for (
             interval_width <- NA_real_
           }
           
+          # Formal coverage is defined only for the correctly specified
+          # Gaussian linear Modal-LP.
           coverage_indicator <- if (
+            valid_interval
+          ) {
+            target_response >= ci_lower &&
+              target_response <= ci_upper
+          } else {
+            NA
+          }
+          # For downside risk this compares a global linear estimator with
+          # a pointwise nonlinear response and is therefore diagnostic only.
+          pointwise_diagnostic_coverage_indicator <- if (
             valid_interval
           ) {
             target_response >= ci_lower &&
@@ -767,6 +780,8 @@ for (
                 interval_width,
               coverage_indicator =
                 coverage_indicator,
+              pointwise_diagnostic_coverage_indicator =
+                pointwise_diagnostic_coverage_indicator,
               n_bootstrap_attempts =
                 n_bootstrap_attempts,
               n_bootstrap_success =
@@ -811,11 +826,12 @@ if (
   stop("The inference output has an unexpected number of rows.")
 }
 
+run_completed_at <- Sys.time()
+
 inference_run_settings <- list(
   run_label = run_label,
   run_started_at = run_started_at,
-  r_version = R.version.string,
-  session_info = utils::sessionInfo(),
+  run_completed_at = run_completed_at,
   dgp_names = dgp_names,
   dgp_parameters = dgp_parameter_records,
   sample_sizes = sample_sizes,
@@ -824,8 +840,6 @@ inference_run_settings <- list(
     n_outer_replications,
   n_bootstrap_replications =
     n_bootstrap_replications,
-  minimum_bootstrap_success_rate =
-    min_bootstrap_success_rate,
   confidence_level = confidence_level,
   delta = delta,
   bw_constant = bw_constant,
@@ -980,6 +994,26 @@ inference_summary <-
     } else {
       NA_real_
     },
+    n_pointwise_diagnostic_replications =
+      sum(
+        !is.na(
+          pointwise_diagnostic_coverage_indicator
+        )
+      ),
+    pointwise_diagnostic_coverage = if (
+      any(
+        !is.na(
+          pointwise_diagnostic_coverage_indicator
+        )
+      )
+    ) {
+      mean(
+        pointwise_diagnostic_coverage_indicator,
+        na.rm = TRUE
+      )
+    } else {
+      NA_real_
+    },
     .groups = "drop"
   ) |>
   dplyr::mutate(
@@ -1004,7 +1038,21 @@ inference_summary <-
           n_formal_coverage_replications
       ),
       NA_real_
-    )
+    ),
+    pointwise_diagnostic_coverage_mcse =
+      ifelse(
+        n_pointwise_diagnostic_replications >
+          0L,
+        sqrt(
+          pointwise_diagnostic_coverage *
+            (
+              1 -
+                pointwise_diagnostic_coverage
+            ) /
+            n_pointwise_diagnostic_replications
+        ),
+        NA_real_
+      )
   ) |>
   dplyr::arrange(
     match(dgp, dgp_names),
@@ -1017,7 +1065,7 @@ inference_summary <-
   )
 
 
-# Comparison with the R = 1000 response Monte Carlo ----
+# Optional comparison with the large script-4 Monte Carlo ----------------
 
 response_mc_sampling_sd_by_cell <- data.frame(
   dgp = character(),
@@ -1037,7 +1085,7 @@ if (
     readRDS(response_mc_results_file),
     error = function(error) {
       warning(
-        "Could not read the response Monte Carlo results: ",
+        "Could not read the optional script-4 results: ",
         conditionMessage(error)
       )
       
@@ -1100,36 +1148,11 @@ if (
   } else if (!is.null(response_mc_results)) {
     warning(
       paste(
-        "The response Monte Carlo object lacks the",
+        "The optional script-4 object lacks the",
         "columns required for the sampling-SD comparison."
       )
     )
   }
-}
-
-expected_response_mc_cells <-
-  expand.grid(
-    dgp = dgp_names,
-    sample_size = sample_sizes,
-    horizon = horizons,
-    stringsAsFactors = FALSE
-  )
-
-missing_response_mc_cells <-
-  expected_response_mc_cells |>
-  dplyr::anti_join(
-    response_mc_sampling_sd_by_cell,
-    by = c(
-      "dgp",
-      "sample_size",
-      "horizon"
-    )
-  )
-
-if (nrow(missing_response_mc_cells) > 0L) {
-  stop(
-    "The R = 1000 response Monte Carlo is missing required inference cells."
-  )
 }
 
 inference_summary <-
@@ -1144,12 +1167,19 @@ inference_summary <-
   ) |>
   dplyr::mutate(
     sampling_sd_for_comparison =
-      response_mc_sampling_sd,
+      dplyr::coalesce(
+        response_mc_sampling_sd,
+        outer_sampling_sd
+      ),
     sampling_sd_source =
-      ifelse(
-        is.finite(response_mc_sampling_sd),
-        "response_mc_R1000",
-        NA_character_
+      dplyr::case_when(
+        is.finite(
+          response_mc_sampling_sd
+        ) ~
+          "script_4_response_mc",
+        is.finite(outer_sampling_sd) ~
+          "current_inference_outer_mc",
+        TRUE ~ NA_character_
       ),
     bootstrap_se_ratio_to_sampling_sd =
       ifelse(
@@ -1184,6 +1214,254 @@ bootstrap_se_calibration <-
   )
 
 
+# Minimal inferential diagnostic plots ------------------------------------
+
+plot_summary_data <-
+  inference_summary |>
+  dplyr::mutate(
+    dgp_label = dplyr::recode(
+      dgp,
+      gaussian = "Gaussian",
+      skewed = "Skewed",
+      disaster = "Disaster"
+    ),
+    sample_size_label =
+      paste0("T = ", sample_size),
+    block_rule_label = dplyr::recode(
+      block_length_rule,
+      fixed_4 = "l = 4",
+      cube_root = "ceiling(n_h^(1/3))"
+    )
+  )
+
+bootstrap_se_plot_data <-
+  plot_summary_data |>
+  dplyr::select(
+    dgp_label,
+    sample_size_label,
+    horizon,
+    block_rule_label,
+    mean_bootstrap_se,
+    sampling_sd_for_comparison
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(
+      mean_bootstrap_se,
+      sampling_sd_for_comparison
+    ),
+    names_to = "uncertainty_measure",
+    values_to = "standard_deviation"
+  ) |>
+  dplyr::mutate(
+    uncertainty_measure =
+      dplyr::recode(
+        uncertainty_measure,
+        mean_bootstrap_se =
+          "Mean bootstrap SE",
+        sampling_sd_for_comparison =
+          "Monte Carlo sampling SD"
+      )
+  )
+
+bootstrap_se_calibration_plot <-
+  ggplot2::ggplot(
+    bootstrap_se_plot_data,
+    ggplot2::aes(
+      x = horizon,
+      y = standard_deviation,
+      color = uncertainty_measure,
+      linetype = block_rule_label,
+      group = interaction(
+        uncertainty_measure,
+        block_rule_label
+      )
+    )
+  ) +
+  ggplot2::geom_line(
+    linewidth = 0.8,
+    na.rm = TRUE
+  ) +
+  ggplot2::geom_point(
+    size = 1.8,
+    na.rm = TRUE
+  ) +
+  ggplot2::facet_grid(
+    rows = ggplot2::vars(dgp_label),
+    cols = ggplot2::vars(
+      sample_size_label
+    ),
+    scales = "free_y"
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = horizons
+  ) +
+  ggplot2::labs(
+    x = "Horizon",
+    y = "Standard deviation",
+    color = NULL,
+    linetype = "Block-length rule",
+    caption = paste(
+      "The Monte Carlo sampling SD comes from script 4",
+      "when its saved results are available; otherwise",
+      "it is calculated from this experiment's outer replications."
+    )
+  ) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    legend.position = "bottom"
+  )
+
+formal_coverage_plot_data <-
+  plot_summary_data |>
+  dplyr::filter(
+    n_formal_coverage_replications > 0L
+  ) |>
+  dplyr::mutate(
+    mc_lower = pmax(
+      0,
+      formal_coverage -
+        1.96 * formal_coverage_mcse
+    ),
+    mc_upper = pmin(
+      1,
+      formal_coverage +
+        1.96 * formal_coverage_mcse
+    )
+  )
+
+formal_coverage_plot <-
+  ggplot2::ggplot(
+    formal_coverage_plot_data,
+    ggplot2::aes(
+      x = horizon,
+      y = formal_coverage,
+      color = block_rule_label,
+      group = block_rule_label
+    )
+  ) +
+  ggplot2::geom_hline(
+    yintercept = confidence_level,
+    linetype = "dashed",
+    linewidth = 0.5
+  ) +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(
+      ymin = mc_lower,
+      ymax = mc_upper
+    ),
+    width = 0.4,
+    linewidth = 0.4,
+    na.rm = TRUE
+  ) +
+  ggplot2::geom_line(
+    linewidth = 0.8,
+    na.rm = TRUE
+  ) +
+  ggplot2::geom_point(
+    size = 1.8,
+    na.rm = TRUE
+  ) +
+  ggplot2::facet_grid(
+    rows = ggplot2::vars(dgp_label),
+    cols = ggplot2::vars(sample_size_label)
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = horizons
+  ) +
+  ggplot2::coord_cartesian(
+    ylim = c(0, 1)
+  ) +
+  ggplot2::labs(
+    x = "Horizon",
+    y = "Empirical percentile-interval coverage",
+    color = "Block-length rule",
+    caption = paste(
+      "Monte Carlo SE for the estimated coverage probability."
+    )
+  ) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    legend.position = "bottom"
+  )
+
+interval_width_plot_data <-
+  plot_summary_data |>
+  dplyr::select(
+    dgp_label,
+    sample_size_label,
+    horizon,
+    block_rule_label,
+    mean_interval_width,
+    median_interval_width
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(
+      mean_interval_width,
+      median_interval_width
+    ),
+    names_to = "width_summary",
+    values_to = "interval_width"
+  ) |>
+  dplyr::mutate(
+    width_summary = dplyr::recode(
+      width_summary,
+      mean_interval_width = "Mean",
+      median_interval_width = "Median"
+    )
+  )
+
+interval_width_plot <-
+  ggplot2::ggplot(
+    interval_width_plot_data,
+    ggplot2::aes(
+      x = horizon,
+      y = interval_width,
+      color = width_summary,
+      linetype = block_rule_label,
+      group = interaction(
+        width_summary,
+        block_rule_label
+      )
+    )
+  ) +
+  ggplot2::geom_line(
+    linewidth = 0.8,
+    na.rm = TRUE
+  ) +
+  ggplot2::geom_point(
+    size = 1.8,
+    na.rm = TRUE
+  ) +
+  ggplot2::facet_grid(
+    rows = ggplot2::vars(dgp_label),
+    cols = ggplot2::vars(
+      sample_size_label
+    ),
+    scales = "free_y"
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = horizons
+  ) +
+  ggplot2::labs(
+    x = "Horizon",
+    y = "Percentile-interval width",
+    color = "Across-replication summary",
+    linetype = "Block-length rule"
+  ) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    legend.position = "bottom"
+  )
+
+inference_plots <- list(
+  bootstrap_se_calibration =
+    bootstrap_se_calibration_plot,
+  formal_coverage =
+    formal_coverage_plot,
+  interval_width =
+    interval_width_plot
+)
+
 
 # Save derived output -----------------------------------------------------
 
@@ -1214,6 +1492,15 @@ response_mc_sampling_sd_path <- file.path(
   )
 )
 
+plots_path <- file.path(
+  results_directory,
+  paste0(
+    "inference_plots_",
+    run_label,
+    ".rds"
+  )
+)
+
 saveRDS(
   inference_summary,
   summary_path
@@ -1229,14 +1516,17 @@ saveRDS(
   response_mc_sampling_sd_path
 )
 
+saveRDS(
+  inference_plots,
+  plots_path
+)
+
 inference_run_settings$response_mc_comparison_used <-
   any(
     is.finite(
       inference_summary$response_mc_sampling_sd
     )
   )
-
-inference_run_settings$run_completed_at <- Sys.time()
 
 saveRDS(
   inference_run_settings,

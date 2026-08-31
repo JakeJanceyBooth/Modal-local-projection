@@ -1,8 +1,11 @@
-# All DGPs return T post-burn observations and the population 
-# responses for h = 1, ..., horizon.
+# simple one-horizon test DGP
+# symmetric DGP (Gaussian)
+# skewed/assymetric DGP (lognormal)
+# rare-disaster-type DGP (Gaussian mixture)
+# richer dynamic state and shock-dependent downside risk
+# functions that give the true mean/mode/median/IRF/MIRF if known
 
-# Gaussian AR(1) DGP.
-# y_t = intercept + rho * y_{t-1} + beta * x_{t-1} + epsilon_t.
+# Gaussian common-target benchmark
 simulate_gaussian_dgp <- function(T, horizon,
                                   intercept = 0,
                                   rho = 0.8,
@@ -10,10 +13,6 @@ simulate_gaussian_dgp <- function(T, horizon,
                                   sigma_x = 1,
                                   sigma_y = 1,
                                   burn = 200) {
-  
-  if (horizon < 1) {
-    stop("horizon must be at least 1.")
-  }
   
   n_total <- T + burn
   
@@ -64,8 +63,7 @@ simulate_gaussian_dgp <- function(T, horizon,
   )
 }
 
-# Additive-skewness DGP.
-# same as DGP 1 except epsilon_t follows skewed distribution
+# Additive-skewness benchmark
 simulate_skewed_dgp <- function(T, horizon,
                                 intercept = 0,
                                 rho = 0.8,
@@ -74,10 +72,6 @@ simulate_skewed_dgp <- function(T, horizon,
                                 sigma_y = 1,
                                 sdlog = 0.5,
                                 burn = 200) {
-  
-  if (horizon < 1) {
-    stop("horizon must be at least 1.")
-  }
   
   n_total <- T + burn
   
@@ -145,8 +139,7 @@ simulate_skewed_dgp <- function(T, horizon,
   )
 }
 
-# Rare-disaster mixture DGP.
-# same as DGP 1 except epsilon_t follows a "rare disaster" distribution
+# Rare-disaster mixture benchmark
 simulate_disaster_dgp <- function(T, horizon,
                                   intercept = 0,
                                   rho = 0.8,
@@ -156,10 +149,6 @@ simulate_disaster_dgp <- function(T, horizon,
                                   disaster_probability = 0.05,
                                   disaster_size = 7.5,
                                   burn = 200) {
-  
-  if (horizon < 1) {
-    stop("horizon must be at least 1.")
-  }
   
   n_total <- T + burn
   
@@ -223,10 +212,7 @@ simulate_disaster_dgp <- function(T, horizon,
   )
 }
 
-# Rich-state AR(2) DGP.
-# y_t = intercept + rho1*y_{t-1} + rho2*y_{t-2}
-#       + beta*x_{t-1} + gamma_s*s_{t-1} + epsilon_t.
-# The state s_t follows an AR(1).
+# Rich dynamic-state benchmark
 simulate_rich_state_dgp <- function(T, horizon,
                                     intercept = 0,
                                     rho1 = 0.5,
@@ -239,10 +225,6 @@ simulate_rich_state_dgp <- function(T, horizon,
                                     sigma_s = 1,
                                     sdlog = 0.5,
                                     burn = 200) {
-  
-  if (horizon < 1) {
-    stop("horizon must be at least 1.")
-  }
   
   n_total <- T + burn
   
@@ -345,10 +327,7 @@ simulate_rich_state_dgp <- function(T, horizon,
   )
 }
 
-# Shock-dependent downside-risk DGP.
-# x_t affects the persistent risk state r_{t+1}; r_t determines the
-# probability of a downside realization in y_t. The shock therefore
-# changes the shape of the horizon-h conditional distribution.
+# Shock-dependent downside-risk benchmark
 simulate_downside_risk_dgp <- function(T, horizon,
                                        phi = 0.8,
                                        kappa = 0.6,
@@ -363,10 +342,6 @@ simulate_downside_risk_dgp <- function(T, horizon,
                                        x_baseline = 0,
                                        delta = 1,
                                        burn = 200) {
-  
-  if (horizon < 1) {
-    stop("horizon must be at least 1.")
-  }
   
   n_total <- T + burn
   
@@ -479,8 +454,7 @@ simulate_downside_risk_dgp <- function(T, horizon,
   )
   
   # Deterministic Gaussian-mixture mode. With the baseline
-  # calibration, the density is unimodal and this is its unique mode,
-  # obtained by finding the unique root of the derivative of the PDF
+  # calibration, the density is unimodal and this is its unique mode.
   mixture_mode <- function(probability) {
     
     uniroot(

@@ -2,10 +2,9 @@
 # Mean LP, Median LP, Modal LP, and VAR
 # Nested samples across sample sizes
 
-library(dplyr)
+source("1_estimators.R")
+source("2_dgps.R")
 
-source(file.path("R", "estimators.R"))
-source(file.path("R", "dgps.R"))
 
 # Monte Carlo settings ----
 
@@ -14,11 +13,6 @@ sample_sizes <- c(
   500,
   1000
 )
-
-mc_seed <- 12345
-
-bw_constant <- 2.4
-start_quantiles <- 0.5
 
 H <- 20
 horizons <- seq_len(H)
@@ -48,28 +42,6 @@ cheap_estimators <- c(
 
 max_sample_size <- max(sample_sizes)
 
-results_directory <- file.path(
-  "results",
-  "responses"
-)
-
-dir.create(
-  results_directory,
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
-run_label <- paste0(
-  "R",
-  n_replications
-)
-
-dgp_parameters <- vector(
-  "list",
-  length(dgp_names)
-)
-
-names(dgp_parameters) <- dgp_names
 
 # preallocate Modal LP results ----
 
@@ -96,6 +68,7 @@ modal_results <- data.frame(
 
 modal_row <- 1
 
+
 # preallocate Mean LP, Median LP, and VAR results ----
 
 n_other_results <- length(dgp_names) *
@@ -121,7 +94,7 @@ other_row <- 1
 
 # response Monte Carlo ----
 
-set.seed(mc_seed)
+set.seed(12345)
 
 for (replication in seq_len(n_replications)) {
   
@@ -152,21 +125,12 @@ for (replication in seq_len(n_replications)) {
       )
     )
     
-    if (replication == 1) {
-      dgp_parameters[[dgp_name]] <-
-        simulated_dgp$parameters
-    }
-    
     truth_index <- match(
       horizons,
       simulated_dgp$true_response$horizon
     )
     
     # Population response assigned to each estimator
-    # For DGPs 1-4 these are exact population response targets.
-    # For DGP 5 they are pointwise nonlinear population benchmarks.
-    # The pseudo-true targets of the linear estimators under DGP 5
-    # are not calculated here.
     if (dgp_name == "downside_risk") {
       
       population_truth <- list(
@@ -369,9 +333,7 @@ for (replication in seq_len(n_replications)) {
               y = y,
               x = x,
               z = z,
-              horizons = h,
-              bw_constant = bw_constant,
-              start_quantiles = start_quantiles
+              horizons = h
             )
             
             modal_response_fit <- lp_response(
@@ -548,107 +510,147 @@ for (replication in seq_len(n_replications)) {
   }
 }
 
-# Save expensive raw output immediately ----
-
-saveRDS(
-  modal_results,
-  file.path(
-    results_directory,
-    paste0(
-      "modal_results_",
-      run_label,
-      ".rds"
-    )
-  )
-)
-
-saveRDS(
-  other_results,
-  file.path(
-    results_directory,
-    paste0(
-      "other_results_",
-      run_label,
-      ".rds"
-    )
-  )
-)
-
-response_run_settings <- list(
-  dgp_names = dgp_names,
-  dgp_parameters = dgp_parameters,
-  sample_sizes = sample_sizes,
-  horizons = horizons,
-  estimator_names = estimator_names,
-  n_replications = n_replications,
-  mc_seed = mc_seed,
-  bw_constant = bw_constant,
-  start_quantiles = start_quantiles,
-  session_info = utils::sessionInfo(),
-)
-
-saveRDS(
-  response_run_settings,
-  file.path(
-    results_directory,
-    paste0(
-      "response_run_settings_",
-      run_label,
-      ".rds"
-    )
-  )
-)
 
 # Monte Carlo summaries ----
 
-response_comparison_summary <-
-  dplyr::bind_rows(
-    modal_results,
-    other_results
-  ) |>
-  dplyr::mutate(
-    success =
-      is.na(failure) &
-      is.finite(estimate)
-  ) |>
-  dplyr::group_by(
-    dgp,
-    estimator,
-    sample_size,
-    horizon
-  ) |>
-  dplyr::summarise(
-    mean_estimate = if (any(success)) {
-      mean(estimate[success])
-    } else {
-      NA_real_
-    },
-    bias = if (any(success)) {
-      mean(error[success])
-    } else {
-      NA_real_
-    },
-    variance = if (sum(success) > 1) {
-      var(estimate[success])
-    } else {
-      NA_real_
-    },
-    rmse = if (any(success)) {
-      sqrt(mean(error[success]^2))
-    } else {
-      NA_real_
-    },
-    n_replications = dplyr::n(),
-    n_success = sum(success),
-    success_rate = mean(success),
-    .groups = "drop"
-  ) |>
-  dplyr::arrange(
-    match(dgp, dgp_names),
-    match(estimator, estimator_names),
-    sample_size,
-    horizon
+raw_result_tables <- list(
+  modal = modal_results,
+  other = other_results
+)
+
+summary_tables <- vector(
+  "list",
+  length(raw_result_tables)
+)
+
+names(summary_tables) <- names(raw_result_tables)
+
+for (table_name in names(raw_result_tables)) {
+  
+  results <- raw_result_tables[[table_name]]
+  
+  result_groups <- split(
+    results,
+    interaction(
+      results$dgp,
+      results$estimator,
+      results$sample_size,
+      results$horizon,
+      drop = TRUE
+    )
   )
+  
+  summary_tables[[table_name]] <- do.call(
+    rbind,
+    lapply(
+      result_groups,
+      function(group) {
+        
+        successful <- is.na(group$failure) &
+          is.finite(group$estimate)
+        
+        n_success <- sum(successful)
+        
+        data.frame(
+          dgp = group$dgp[1],
+          estimator = group$estimator[1],
+          sample_size = group$sample_size[1],
+          horizon = group$horizon[1],
+          bias = if (n_success > 0) {
+            mean(group$error[successful])
+          } else {
+            NA_real_
+          },
+          variance = if (n_success > 1) {
+            var(group$estimate[successful])
+          } else {
+            NA_real_
+          },
+          rmse = if (n_success > 0) {
+            sqrt(mean(
+              group$error[successful]^2
+            ))
+          } else {
+            NA_real_
+          },
+          n_replications = nrow(group),
+          n_success = n_success,
+          success_rate =
+            n_success / nrow(group)
+        )
+      }
+    )
+  )
+  
+  rownames(
+    summary_tables[[table_name]]
+  ) <- NULL
+}
+
+modal_summary <- summary_tables$modal
+other_summary <- summary_tables$other
+
+response_comparison_summary <- rbind(
+  modal_summary,
+  other_summary
+)
+
+rownames(response_comparison_summary) <- NULL
+
+response_comparison_summary <-
+  response_comparison_summary[
+    order(
+      match(
+        response_comparison_summary$dgp,
+        dgp_names
+      ),
+      match(
+        response_comparison_summary$estimator,
+        estimator_names
+      ),
+      response_comparison_summary$sample_size,
+      response_comparison_summary$horizon
+    ),
+  ]
+
+
+# inspect results ----
+
+head(modal_results)
+head(other_results)
+head(response_comparison_summary)
+
+response_comparison_summary[
+  response_comparison_summary$success_rate < 1,
+  c(
+    "dgp",
+    "estimator",
+    "sample_size",
+    "horizon",
+    "n_success",
+    "success_rate"
+  )
+]
+
+# Save output
+
+saveRDS(response_comparison_summary, "response_comparison_summary.rds")
+
+saveRDS(modal_results, "modal_response_results.rds")
+
+saveRDS(other_results, "other_response_results.rds")
+
+results_directory <- file.path(
+  "results",
+  "responses"
+)
+
+dir.create(
+  results_directory,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
 
 # extract population truths ----
 
@@ -670,7 +672,364 @@ response_truth <- bind_rows(
 ) |>
   distinct()
 
+
+# data for plotting ----
+
+response_plot_data <-
+  response_comparison_summary |>
+  left_join(
+    response_truth,
+    by = c(
+      "dgp",
+      "estimator",
+      "horizon"
+    )
+  ) |>
+  mutate(
+    estimator = factor(
+      estimator,
+      levels = c(
+        "Mean LP",
+        "Median LP",
+        "Modal LP",
+        "VAR"
+      )
+    ),
+    average_estimate = truth + bias,
+    mcse = sqrt(
+      variance / n_success
+    ),
+    mc_lower =
+      average_estimate - 1.96 * mcse,
+    mc_upper =
+      average_estimate + 1.96 * mcse
+  )
+
+modal_results <- readRDS(
+  "results/responses/modal_results_R1000.rds"
+)
+
+mc_sd <- modal_results |>
+  filter(
+    dgp %in% c("gaussian", "skewed", "disaster"),
+    sample_size %in% c(250, 1000),
+    horizon %in% c(1, 5, 20)
+  ) |>
+  group_by(dgp, sample_size, horizon) |>
+  summarise(
+    mc_sd = sd(estimate, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(sample_size, horizon, dgp) |>
+  mutate(mc_sd = round(mc_sd,4))
+
+mc_sd
+
+# plot 1. RMSE overview ----
+
+plot_rmse <- ggplot(
+  response_plot_data,
+  aes(
+    horizon,
+    rmse,
+    colour = estimator,
+    linetype = estimator
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  facet_grid(
+    dgp ~ sample_size,
+    scales = "free_y"
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  labs(
+    x = "Horizon",
+    y = "RMSE",
+    colour = "Estimator",
+    linetype = "Estimator"
+  ) +
+  theme_minimal()
+
+
+# plot 2. bias overview ----
+
+plot_bias <- ggplot(
+  response_plot_data,
+  aes(
+    horizon,
+    bias,
+    colour = estimator,
+    linetype = estimator
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(linewidth = 0.8) +
+  facet_grid(
+    dgp ~ sample_size,
+    scales = "free_y"
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Bias",
+    colour = "Estimator",
+    linetype = "Estimator"
+  ) +
+  theme_minimal()
+
+
+# plot 3. DGP 5 response separation ----
+
+downside_plot_data <-
+  response_plot_data |>
+  filter(
+    dgp == "downside_risk",
+    estimator != "VAR"
+  ) |>
+  dplyr::select(
+    estimator,
+    sample_size,
+    horizon,
+    truth,
+    average_estimate
+  ) |>
+  pivot_longer(
+    c(
+      truth,
+      average_estimate
+    ),
+    names_to = "series",
+    values_to = "response"
+  )
+
+plot_downside <- ggplot(
+  downside_plot_data,
+  aes(
+    horizon,
+    response,
+    colour = estimator,
+    linetype = series
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(linewidth = 0.9) +
+  facet_wrap(
+    ~ sample_size,
+    nrow = 1
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  scale_linetype_manual(
+    values = c(
+      truth = "dashed",
+      average_estimate = "solid"
+    ),
+    labels = c(
+      truth = "Population truth",
+      average_estimate =
+        "Monte Carlo average"
+    )
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Response",
+    colour = "Estimator",
+    linetype = NULL
+  ) +
+  theme_minimal()
+
+
+# plot 4-5. common-target responses ----
+
+gaussian_plot_data <-
+  response_plot_data |>
+  filter(
+    dgp == "gaussian"
+  )
+
+plot_gaussian <- ggplot(
+  gaussian_plot_data,
+  aes(
+    horizon,
+    average_estimate,
+    colour = estimator
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(linewidth = 0.9) +
+  geom_line(
+    data = gaussian_plot_data |>
+      filter(
+        estimator == "Mean LP"
+      ),
+    aes(
+      x = horizon,
+      y = truth
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.9
+  ) +
+  facet_wrap(
+    ~ sample_size,
+    nrow = 1
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Response",
+    colour = "Estimator"
+  ) +
+  theme_minimal()
+
+
+common_target_plot_data <-
+  response_plot_data |>
+  filter(
+    dgp %in% c(
+      "gaussian",
+      "skewed",
+      "disaster",
+      "rich_state"
+    )
+  ) |>
+  mutate(
+    dgp_label = recode(
+      dgp,
+      gaussian = "Gaussian",
+      skewed = "Skewed",
+      disaster = "Rare disaster",
+      rich_state = "Rich state"
+    )
+  )
+
+plot_common_target <- ggplot(
+  common_target_plot_data,
+  aes(
+    horizon,
+    average_estimate,
+    colour = estimator
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(
+    linewidth = 0.9
+  ) +
+  geom_line(
+    data = common_target_plot_data |>
+      filter(
+        estimator == "Mean LP"
+      ),
+    aes(
+      x = horizon,
+      y = truth
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.9
+  ) +
+  facet_grid(
+    dgp_label ~ sample_size,
+    scales = "free_y",
+    labeller = label_both
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Response",
+    colour = "Estimator"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+
+# plot 6. DGP 5 modal LP Monte Carlo uncertainty ----
+
+plot_downside_modal_mcse <- ggplot(
+  response_plot_data |>
+    filter(
+      dgp == "downside_risk",
+      estimator == "Modal LP"
+    ),
+  aes(
+    horizon,
+    average_estimate
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_ribbon(
+    aes(
+      ymin = mc_lower,
+      ymax = mc_upper
+    ),
+    alpha = 0.2
+  ) +
+  geom_line(
+    aes(
+      y = truth
+    ),
+    linetype = "dashed",
+    linewidth = 0.9
+  ) +
+  geom_line(
+    linewidth = 0.9
+  ) +
+  facet_wrap(
+    ~ sample_size,
+    nrow = 1
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Modal response"
+  ) +
+  theme_minimal()
+
+
+# store plots together in list ----
+
+response_plots <- list(
+  rmse = plot_rmse,
+  bias = plot_bias,
+  downside_response = plot_downside,
+  gaussian_response = plot_gaussian,
+  downside_modal_mcse =
+    plot_downside_modal_mcse,
+  common_target_response = plot_common_target
+)
+
+
 # save everything .RDS----
+
+run_label <- paste0(
+  "R",
+  n_replications
+)
 
 saveRDS(
   modal_results,
@@ -726,6 +1085,18 @@ saveRDS(
     results_directory,
     paste0(
       "response_plot_data_",
+      run_label,
+      ".rds"
+    )
+  )
+)
+
+saveRDS(
+  response_plots,
+  file.path(
+    results_directory,
+    paste0(
+      "response_plots_",
       run_label,
       ".rds"
     )

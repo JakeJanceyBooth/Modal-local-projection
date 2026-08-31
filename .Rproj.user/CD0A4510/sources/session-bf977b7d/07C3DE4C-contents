@@ -1,9 +1,13 @@
+# now compare simulation performance across all the estimators
+# mode LP, mean LP, median LP, and VARs
+# "common-target vs different-target" tests, maybe
+
 # Realized-outcome forecasting Monte Carlo
-# Fixed estimation with multiple out-of-sample forecast origins
+# Fixed estimation with multiple forecast origins
 # Mean LP, Median LP, Modal LP, and VAR
 
-source(file.path("R", "estimators.R"))
-source(file.path("R", "dgps.R"))  
+source("1_estimators.R")
+source("2_dgps.R")
 
 if (!requireNamespace("data.table", quietly = TRUE)) {
   stop(
@@ -47,27 +51,14 @@ n_replications <- 5000
 bw_constant <- 2.4
 start_quantiles <- 0.5
 
-disaster_probability <- 0.05
-disaster_size <- 7.5
-
 mc_seed <- 12345
 
 max_sample_size <- max(sample_sizes)
 H <- max(horizons)
 
-validate_var_recursion <- TRUE
-
-# Retain exact DGP parameters
-
-dgp_parameters <- vector(
-  "list",
-  length(dgp_names)
-)
-
-names(dgp_parameters) <- dgp_names
-
 # The first forecast origin is the common estimation cutoff.
-# The last required outcome is: cutoff + (n_forecast_origins - 1) + H
+# The last required outcome is:
+# cutoff + (n_forecast_origins - 1) + H
 estimation_cutoff <- max_sample_size
 
 simulation_size <- max_sample_size +
@@ -77,60 +68,8 @@ simulation_size <- max_sample_size +
 forecast_origins <- estimation_cutoff +
   0:(n_forecast_origins - 1)
 
-half_widths <- c(
-  0.25,
-  0.50,
-  0.75,
-  1.00,
-  1.50,
-  2.00
-)
 
-forecast_design_label <- "fixed_width_coverage"
-
-results_directory <- file.path(
-  "results",
-  "forecasting"
-)
-
-dir.create(
-  results_directory,
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
-run_label <- paste0(
-  forecast_design_label,
-  "_R",
-  n_replications,
-  "_O",
-  n_forecast_origins,
-  "_h",
-  paste(horizons, collapse = "-")
-)
-
-save_run_object <- function(object, file_stem) {
-  saveRDS(
-    object,
-    file.path(
-      results_directory,
-      paste0(
-        file_stem,
-        "_",
-        run_label,
-        ".rds"
-      )
-    )
-  )
-  
-  invisible(NULL)
-}
-
-run_started_at <- Sys.time()
-
-# helper functions ----
-
-# Fixed-coefficient VAR forecast from an arbitrary origin
+# Fixed-coefficient VAR forecast from an arbitrary origin ----
 
 var_predict_from_origin <- function(fitted_var,
                                     history,
@@ -224,7 +163,7 @@ var_predict_from_origin <- function(fitted_var,
 }
 
 
-# Construct one raw forecast row
+# Construct one raw forecast row ----
 
 forecast_result_row <- function(dgp_name,
                                 sample_size,
@@ -235,6 +174,11 @@ forecast_result_row <- function(dgp_name,
                                 horizon,
                                 forecast,
                                 realized,
+                                x_origin,
+                                y_origin,
+                                y_lag1_origin,
+                                s_origin,
+                                disaster_target,
                                 n_disasters_to_target,
                                 failure) {
   
@@ -250,8 +194,6 @@ forecast_result_row <- function(dgp_name,
     is.finite(realized)
   
   if (successful) {
-    
-    # Note: forecast error is defined as forecast minus realized.
     
     forecast_error <- forecast - realized
     absolute_error <- abs(forecast_error)
@@ -277,48 +219,38 @@ forecast_result_row <- function(dgp_name,
     forecast_error = forecast_error,
     absolute_error = absolute_error,
     squared_error = squared_error,
+    x_origin = x_origin,
+    y_origin = y_origin,
+    y_lag1_origin = y_lag1_origin,
+    s_origin = s_origin,
+    disaster_target = disaster_target,
     n_disasters_to_target =
       n_disasters_to_target,
     failure = failure
   )
 }
 
-# Store one forecast row without copying the full data frame
+# Store one forecast row without copying the full data frame ----
 
 store_forecast_row <- function(results,
                                row_index,
                                row_values) {
   
-  data.table::set(
-    results,
-    i = row_index,
-    j = names(row_values),
-    value = unname(row_values)
-  )
+  for (column_name in names(row_values)) {
+    
+    data.table::set(
+      results,
+      i = row_index,
+      j = column_name,
+      value = row_values[[column_name]]
+    )
+  }
   
   invisible(NULL)
 }
 
-# Count disasters to target (for DGP 3)
 
-count_disasters_to_target <- function(data,
-                                      dgp_name,
-                                      forecast_origin,
-                                      target_time) {
-  if (dgp_name != "disaster") {
-    return(NA_integer_)
-  }
-  
-  sum(
-    data$disaster[
-      (forecast_origin + 1):target_time
-    ]
-  )
-}
-
-# Preallocate results ----
-
-#forecast results
+# Preallocate raw forecast results ----
 
 n_forecast_results <- length(dgp_names) *
   length(sample_sizes) *
@@ -340,6 +272,11 @@ forecast_results_raw <- data.frame(
   forecast_error = rep(NA_real_, n_forecast_results),
   absolute_error = rep(NA_real_, n_forecast_results),
   squared_error = rep(NA_real_, n_forecast_results),
+  x_origin = rep(NA_real_, n_forecast_results),
+  y_origin = rep(NA_real_, n_forecast_results),
+  y_lag1_origin = rep(NA_real_, n_forecast_results),
+  s_origin = rep(NA_real_, n_forecast_results),
+  disaster_target = rep(NA_integer_, n_forecast_results),
   n_disasters_to_target = rep(NA_integer_, n_forecast_results),
   failure = rep(NA_character_, n_forecast_results)
 )
@@ -347,7 +284,7 @@ forecast_results_raw <- data.frame(
 forecast_row <- 1
 
 
-#Modal-LP fit diagnostics
+# Preallocate Modal-LP fit diagnostics ----
 
 n_modal_diagnostics <- length(dgp_names) *
   length(sample_sizes) *
@@ -374,6 +311,18 @@ modal_forecast_fit_diagnostics <- data.frame(
 modal_diagnostic_row <- 1
 
 
+# Retain the exact DGP parameters used in the run ----
+
+dgp_parameters <- vector(
+  "list",
+  length(dgp_names)
+)
+
+names(dgp_parameters) <- dgp_names
+
+
+
+
 # Forecasting Monte Carlo ----
 
 set.seed(mc_seed)
@@ -382,8 +331,7 @@ for (replication in seq_len(n_replications)) {
   
   for (dgp_name in dgp_names) {
     
-    # Simulate once per replication and DGP, then reuse the
-    # same path across sample sizes and estimators
+    # Simulate once for every sample size and estimator
     simulated_dgp <- switch(
       dgp_name,
       gaussian = simulate_gaussian_dgp(
@@ -396,9 +344,7 @@ for (replication in seq_len(n_replications)) {
       ),
       disaster = simulate_disaster_dgp(
         T = simulation_size,
-        horizon = H,
-        disaster_probability = disaster_probability,
-        disaster_size = disaster_size
+        horizon = H
       ),
       rich_state = simulate_rich_state_dgp(
         T = simulation_size,
@@ -495,6 +441,7 @@ for (replication in seq_len(n_replications)) {
       # the latest usable estimation origin is cutoff-h.
       # No outcome after the cutoff can enter estimation.
       
+      
       # Mean LP: all requested horizons in one call ----
       
       mean_attempt <- tryCatch(
@@ -530,42 +477,37 @@ for (replication in seq_len(n_replications)) {
             lags = var_lags
           )
           
-          # Validate the custom recursion against the package forecast
-          # once, using the first successful VAR fit.
-          if (!var_recursion_validated) {
-            
-            package_forecast <- var_predict(
-              fitted_var = var_fit,
-              variable = "y",
-              horizon = H
+          # Validate the local recursion at the original
+          # estimation cutoff against the package forecast
+          package_forecast <- var_predict(
+            fitted_var = var_fit,
+            variable = "y",
+            horizon = H
+          )
+          
+          fixed_forecast <- var_predict_from_origin(
+            fitted_var = var_fit,
+            history = var_training_data,
+            variable = "y",
+            horizon = H
+          )
+          
+          forecasts_match <- isTRUE(
+            all.equal(
+              package_forecast$prediction,
+              fixed_forecast$prediction,
+              tolerance = 1e-8,
+              check.attributes = FALSE
             )
-            
-            fixed_forecast <- var_predict_from_origin(
-              fitted_var = var_fit,
-              history = var_training_data,
-              variable = "y",
-              horizon = H
-            )
-            
-            forecasts_match <- isTRUE(
-              all.equal(
-                package_forecast$prediction,
-                fixed_forecast$prediction,
-                tolerance = 1e-8,
-                check.attributes = FALSE
+          )
+          
+          if (!forecasts_match) {
+            stop(
+              paste(
+                "Fixed-coefficient VAR recursion does not",
+                "match var_predict() at the estimation cutoff."
               )
             )
-            
-            if (!forecasts_match) {
-              stop(
-                paste(
-                  "Fixed-coefficient VAR recursion does not",
-                  "match var_predict() at the estimation cutoff."
-                )
-              )
-            }
-            
-            var_recursion_validated <- TRUE
           }
           
           var_fit
@@ -659,12 +601,22 @@ for (replication in seq_len(n_replications)) {
             target_time <- forecast_origin + horizon
             realized <- full_data$y[target_time]
             
-            n_disasters_to_target <- count_disasters_to_target(
-              data = full_data,
-              dgp_name = dgp_name,
-              forecast_origin = forecast_origin,
-              target_time = target_time
-            )
+            if (dgp_name == "disaster") {
+              
+              disaster_target <-
+                full_data$disaster[target_time]
+              
+              n_disasters_to_target <- sum(
+                full_data$disaster[
+                  (forecast_origin + 1):target_time
+                ]
+              )
+              
+            } else {
+              
+              disaster_target <- NA_integer_
+              n_disasters_to_target <- NA_integer_
+            }
             
             forecast_row_values <- forecast_result_row(
               dgp_name = dgp_name,
@@ -676,6 +628,12 @@ for (replication in seq_len(n_replications)) {
               horizon = horizon,
               forecast = forecast_values[h_index],
               realized = realized,
+              x_origin = x_origin,
+              y_origin = y_origin,
+              y_lag1_origin =
+                y_lag1_origin,
+              s_origin = s_origin,
+              disaster_target = disaster_target,
               n_disasters_to_target = n_disasters_to_target,
               failure = failure_message
             )
@@ -811,12 +769,22 @@ for (replication in seq_len(n_replications)) {
           target_time <- forecast_origin + horizon
           realized <- full_data$y[target_time]
           
-          n_disasters_to_target <- count_disasters_to_target(
-            data = full_data,
-            dgp_name = dgp_name,
-            forecast_origin = forecast_origin,
-            target_time = target_time
-          )
+          if (dgp_name == "disaster") {
+            
+            disaster_target <-
+              full_data$disaster[target_time]
+            
+            n_disasters_to_target <- sum(
+              full_data$disaster[
+                (forecast_origin + 1):target_time
+              ]
+            )
+            
+          } else {
+            
+            disaster_target <- NA_integer_
+            n_disasters_to_target <- NA_integer_
+          }
           
           forecast_row_values <- forecast_result_row(
             dgp_name = dgp_name,
@@ -828,6 +796,12 @@ for (replication in seq_len(n_replications)) {
             horizon = horizon,
             forecast = forecast_value,
             realized = realized,
+            x_origin = x_origin,
+            y_origin = y_origin,
+            y_lag1_origin =
+              y_lag1_origin,
+            s_origin = s_origin,
+            disaster_target = disaster_target,
             n_disasters_to_target = n_disasters_to_target,
             failure = failure_message
           )
@@ -923,12 +897,22 @@ for (replication in seq_len(n_replications)) {
           target_time <- forecast_origin + horizon
           realized <- full_data$y[target_time]
           
-          n_disasters_to_target <- count_disasters_to_target(
-            data = full_data,
-            dgp_name = dgp_name,
-            forecast_origin = forecast_origin,
-            target_time = target_time
-          )
+          if (dgp_name == "disaster") {
+            
+            disaster_target <-
+              full_data$disaster[target_time]
+            
+            n_disasters_to_target <- sum(
+              full_data$disaster[
+                (forecast_origin + 1):target_time
+              ]
+            )
+            
+          } else {
+            
+            disaster_target <- NA_integer_
+            n_disasters_to_target <- NA_integer_
+          }
           
           forecast_row_values <- forecast_result_row(
             dgp_name = dgp_name,
@@ -940,6 +924,12 @@ for (replication in seq_len(n_replications)) {
             horizon = horizon,
             forecast = forecast_values[h_index],
             realized = realized,
+            x_origin = x_origin,
+            y_origin = y_origin,
+            y_lag1_origin =
+              y_lag1_origin,
+            s_origin = s_origin,
+            disaster_target = disaster_target,
             n_disasters_to_target =
               n_disasters_to_target,
             failure = failure_message
@@ -958,7 +948,7 @@ for (replication in seq_len(n_replications)) {
   }
   
   if (
-    replication %% 50 == 0 ||
+    replication %% 5 == 0 ||
     replication == n_replications
   ) {
     message(
@@ -969,8 +959,6 @@ for (replication in seq_len(n_replications)) {
     )
   }
 }
-
-run_finished_at <- Sys.time()
 
 # Check that every preallocated forecast row was filled
 
@@ -991,8 +979,50 @@ if (forecast_row != n_forecast_results + 1) {
 
 # Every interval is centered on an estimator's point forecast:
 # [forecast - half_width, forecast + half_width].
-# This is a fixed-width coverage comparison, not a
-# loss function that relates specifically to the conditional mode.
+# This is a fixed-width coverage comparison, not a newly proposed
+# loss function that uniquely elicits the conditional mode.
+
+half_widths <- c(
+  0.25,
+  0.50,
+  0.75,
+  1.00,
+  1.50,
+  2.00
+)
+
+results_directory <- file.path(
+  "results",
+  "forecasting"
+)
+
+dir.create(
+  results_directory,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+run_label <- paste0(
+  forecast_design_label,
+  "_R",
+  n_replications,
+  "_O",
+  n_forecast_origins,
+  "_h",
+  paste(horizons, collapse = "-")
+)
+
+save_run_object <- function(object, file_stem) {
+  saveRDS(
+    object,
+    file.path(
+      results_directory,
+      paste0(file_stem, "_", run_label, ".rds")
+    )
+  )
+  
+  invisible(NULL)
+}
 
 mcse_from_replications <- function(x) {
   x <- x[is.finite(x)]
@@ -1013,19 +1043,15 @@ forecast_run_settings <- list(
   estimator_names = estimator_names,
   half_widths = half_widths,
   total_widths = 2 * half_widths,
-  coverage_rule = "absolute_error <= half_width",
+  coverage_rule =
+    "absolute_error <= half_width",
   n_forecast_origins = n_forecast_origins,
   n_replications = n_replications,
   bw_constant = bw_constant,
   start_quantiles = start_quantiles,
-  disaster_probability = disaster_probability,
-  disaster_size = disaster_size,
   estimation_cutoff = estimation_cutoff,
   simulation_size = simulation_size,
-  mc_seed = mc_seed,
-  run_started_at = run_started_at,
-  run_finished_at = run_finished_at,
-  session_info = utils::sessionInfo()
+  mc_seed = mc_seed
 )
 
 
@@ -1666,6 +1692,372 @@ disaster_coverage_summary <-
 
 
 
+# Plot data ----
+
+dgp_labels <- c(
+  gaussian = "Gaussian",
+  skewed = "Skewed lognormal",
+  disaster = "Disaster mixture",
+  rich_state = "Rich state"
+)
+
+average_forecast_plot_data <-
+  average_forecast_summary |>
+  dplyr::mutate(
+    dgp = factor(
+      dgp,
+      levels = dgp_names,
+      labels = unname(dgp_labels[dgp_names])
+    ),
+    sample_size = factor(
+      sample_size,
+      levels = sample_sizes
+    ),
+    estimator = factor(
+      estimator,
+      levels = estimator_names
+    )
+  )
+
+forecast_coverage_plot_data <-
+  forecast_coverage_summary |>
+  dplyr::mutate(
+    dgp = factor(
+      dgp,
+      levels = dgp_names,
+      labels = unname(dgp_labels[dgp_names])
+    ),
+    horizon = factor(horizon, levels = horizons),
+    estimator = factor(
+      estimator,
+      levels = estimator_names
+    )
+  )
+
+paired_coverage_plot_data <-
+  paired_coverage_summary |>
+  dplyr::mutate(
+    dgp = factor(
+      dgp,
+      levels = dgp_names,
+      labels = unname(dgp_labels[dgp_names])
+    ),
+    horizon = factor(horizon, levels = horizons),
+    comparison = factor(
+      comparison,
+      levels = c("Modal - Mean", "Modal - Median")
+    )
+  )
+
+disaster_coverage_plot_data <-
+  disaster_coverage_summary |>
+  dplyr::mutate(
+    horizon = factor(horizon, levels = horizons),
+    estimator = factor(
+      estimator,
+      levels = estimator_names
+    ),
+    disaster_path = factor(
+      disaster_path,
+      levels = c(
+        "No disaster",
+        "At least one disaster"
+      )
+    )
+  )
+
+
+
+# Plot 1: average issued forecasts ----
+
+average_forecast_plot <-
+  ggplot2::ggplot(
+    average_forecast_plot_data,
+    ggplot2::aes(
+      x = horizon,
+      y = average_forecast,
+      color = estimator,
+      linetype = estimator,
+      group = estimator
+    )
+  ) +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(ymin = mc_lower, ymax = mc_upper),
+    width = 0.35,
+    linewidth = 0.35,
+    alpha = 0.65,
+    na.rm = TRUE
+  ) +
+  ggplot2::geom_line(
+    linewidth = 0.8,
+    na.rm = TRUE
+  ) +
+  ggplot2::geom_point(
+    size = 1.8,
+    na.rm = TRUE
+  ) +
+  ggplot2::facet_grid(
+    rows = ggplot2::vars(dgp),
+    cols = ggplot2::vars(sample_size),
+    scales = "free_y"
+  ) +
+  ggplot2::scale_x_continuous(breaks = horizons) +
+  ggplot2::labs(
+    x = "Horizon",
+    y = "Average issued forecast",
+    color = "Estimator",
+    linetype = "Estimator",
+    caption = paste(
+      "Vertical bars show +/- 1.96 Monte Carlo SE",
+      "based on replication-level averages."
+    )
+  ) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(legend.position = "bottom")
+
+
+# Plot 2: absolute fixed-width coverage ----
+#
+# Create one faceted plot per sample size. This retains all sample
+# sizes without placing twelve estimator/sample-size curves together.
+
+forecast_coverage_plots <- lapply(
+  sample_sizes,
+  function(current_sample_size) {
+    current_plot_data <-
+      forecast_coverage_plot_data |>
+      dplyr::filter(
+        sample_size == current_sample_size
+      )
+    
+    ggplot2::ggplot(
+      current_plot_data,
+      ggplot2::aes(
+        x = half_width,
+        y = mean_coverage,
+        color = estimator,
+        linetype = estimator,
+        group = estimator
+      )
+    ) +
+      ggplot2::geom_errorbar(
+        ggplot2::aes(ymin = mc_lower, ymax = mc_upper),
+        width = 0.03,
+        linewidth = 0.3,
+        alpha = 0.60,
+        na.rm = TRUE
+      ) +
+      ggplot2::geom_line(
+        linewidth = 0.8,
+        na.rm = TRUE
+      ) +
+      ggplot2::geom_point(
+        size = 1.6,
+        na.rm = TRUE
+      ) +
+      ggplot2::facet_grid(
+        rows = ggplot2::vars(dgp),
+        cols = ggplot2::vars(horizon)
+      ) +
+      ggplot2::scale_x_continuous(breaks = half_widths) +
+      ggplot2::scale_y_continuous(
+        labels = function(x) {
+          paste0(round(100 * x), "%")
+        }
+      ) +
+      ggplot2::coord_cartesian(ylim = c(0, 1)) +
+      ggplot2::labs(
+        title = paste0(
+          "Fixed-width forecast coverage: T = ",
+          current_sample_size
+        ),
+        subtitle =
+          "Half-width a; total interval width is 2a",
+        x = "Interval half-width",
+        y = "Coverage",
+        color = "Estimator",
+        linetype = "Estimator",
+        caption = paste(
+          "Vertical bars show +/- 1.96 Monte Carlo SE",
+          "based on replication-level coverage rates."
+        )
+      ) +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(
+        legend.position = "bottom",
+        axis.text.x = ggplot2::element_text(
+          angle = 45,
+          hjust = 1
+        )
+      )
+  }
+)
+
+names(forecast_coverage_plots) <-
+  paste0("T", sample_sizes)
+
+
+# Plot 3: paired Modal coverage differences ----
+
+paired_coverage_plots <- lapply(
+  sample_sizes,
+  function(current_sample_size) {
+    current_plot_data <-
+      paired_coverage_plot_data |>
+      dplyr::filter(
+        sample_size == current_sample_size
+      )
+    
+    ggplot2::ggplot(
+      current_plot_data,
+      ggplot2::aes(
+        x = half_width,
+        y = mean_coverage_difference,
+        color = comparison,
+        linetype = comparison,
+        group = comparison
+      )
+    ) +
+      ggplot2::geom_hline(
+        yintercept = 0,
+        linewidth = 0.4
+      ) +
+      ggplot2::geom_errorbar(
+        ggplot2::aes(ymin = mc_lower, ymax = mc_upper),
+        width = 0.03,
+        linewidth = 0.3,
+        alpha = 0.60,
+        na.rm = TRUE
+      ) +
+      ggplot2::geom_line(
+        linewidth = 0.8,
+        na.rm = TRUE
+      ) +
+      ggplot2::geom_point(
+        size = 1.6,
+        na.rm = TRUE
+      ) +
+      ggplot2::facet_grid(
+        rows = ggplot2::vars(dgp),
+        cols = ggplot2::vars(horizon),
+        scales = "free_y"
+      ) +
+      ggplot2::scale_x_continuous(breaks = half_widths) +
+      ggplot2::scale_y_continuous(
+        labels = function(x) {
+          paste0(round(100 * x, 1), " pp")
+        }
+      ) +
+      ggplot2::labs(
+        title = paste0(
+          "Paired Modal-LP coverage differences: T = ",
+          current_sample_size
+        ),
+        subtitle = paste(
+          "Positive values favor Modal LP;",
+          "the ranking is an empirical question"
+        ),
+        x = "Interval half-width",
+        y = "Paired coverage difference",
+        color = "Comparison",
+        linetype = "Comparison",
+        caption = paste(
+          "Comparisons use pair-specific common-success events.",
+          "Vertical bars show +/- 1.96 Monte Carlo SE."
+        )
+      ) +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(
+        legend.position = "bottom",
+        axis.text.x = ggplot2::element_text(
+          angle = 45,
+          hjust = 1
+        )
+      )
+  }
+)
+
+names(paired_coverage_plots) <-
+  paste0("T", sample_sizes)
+
+
+# Plot 4: disaster versus no-disaster paths ----
+
+disaster_coverage_plots <- lapply(
+  sample_sizes,
+  function(current_sample_size) {
+    current_plot_data <-
+      disaster_coverage_plot_data |>
+      dplyr::filter(
+        sample_size == current_sample_size
+      )
+    
+    ggplot2::ggplot(
+      current_plot_data,
+      ggplot2::aes(
+        x = half_width,
+        y = mean_coverage,
+        color = estimator,
+        linetype = estimator,
+        group = estimator
+      )
+    ) +
+      ggplot2::geom_line(
+        linewidth = 0.8,
+        na.rm = TRUE
+      ) +
+      ggplot2::geom_point(
+        size = 1.6,
+        na.rm = TRUE
+      ) +
+      ggplot2::facet_grid(
+        rows = ggplot2::vars(disaster_path),
+        cols = ggplot2::vars(horizon)
+      ) +
+      ggplot2::scale_x_continuous(breaks = half_widths) +
+      ggplot2::scale_y_continuous(
+        labels = function(x) {
+          paste0(round(100 * x), "%")
+        }
+      ) +
+      ggplot2::coord_cartesian(ylim = c(0, 1)) +
+      ggplot2::labs(
+        title = paste0(
+          "Disaster-path coverage diagnostic: T = ",
+          current_sample_size
+        ),
+        subtitle =
+          "See disaster_coverage_summary for event counts",
+        x = "Interval half-width",
+        y = "Conditional coverage",
+        color = "Estimator",
+        linetype = "Estimator"
+      ) +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(
+        legend.position = "bottom",
+        axis.text.x = ggplot2::element_text(
+          angle = 45,
+          hjust = 1
+        )
+      )
+  }
+)
+
+names(disaster_coverage_plots) <-
+  paste0("T", sample_sizes)
+
+forecast_plots <- list(
+  average_issued_forecasts = average_forecast_plot,
+  fixed_width_coverage = forecast_coverage_plots,
+  paired_modal_coverage_differences =
+    paired_coverage_plots,
+  disaster_coverage_diagnostic =
+    disaster_coverage_plots
+)
+
+
+
 # Final checks before saving derived output ----
 
 # 1. Coverage must be weakly increasing in half-width within every
@@ -1734,8 +2126,8 @@ if (
 }
 
 
-# 2. Stored paired counts must be consistent across widths
-# with the pair-specific common-success counts.
+# 2. Stored paired counts must equal independently constructed
+# pair-specific common-success counts.
 
 paired_count_check <-
   paired_coverage_by_replication |>
@@ -1797,7 +2189,78 @@ if (
   )
 }
 
-# 4. Required outputs must be nonempty and width-indexed outputs must
+
+# 4. All estimators must face the same realized outcome for each
+# forecast event.
+
+realized_outcome_check <-
+  forecast_results_raw |>
+  dplyr::group_by(
+    dgp,
+    sample_size,
+    replication,
+    forecast_origin,
+    target_time,
+    horizon
+  ) |>
+  dplyr::summarise(
+    n_realized_values = dplyr::n_distinct(realized),
+    n_estimators = dplyr::n_distinct(estimator),
+    .groups = "drop"
+  ) |>
+  dplyr::filter(
+    n_realized_values != 1 |
+      n_estimators != length(estimator_names)
+  )
+
+if (nrow(realized_outcome_check) > 0) {
+  stop(
+    paste(
+      "Realized outcomes or estimator counts disagree",
+      "within at least one forecast event."
+    )
+  )
+}
+
+
+# 5. DGP 3 must use the redesigned defaults.
+
+disaster_parameters <- dgp_parameters[["disaster"]]
+
+valid_disaster_probability <-
+  !is.null(disaster_parameters$disaster_probability) &&
+  isTRUE(
+    all.equal(
+      as.numeric(
+        disaster_parameters$disaster_probability
+      ),
+      0.05,
+      tolerance = 1e-12
+    )
+  )
+
+valid_disaster_size <-
+  !is.null(disaster_parameters$disaster_size) &&
+  isTRUE(
+    all.equal(
+      as.numeric(disaster_parameters$disaster_size),
+      7.5,
+      tolerance = 1e-12
+    )
+  )
+
+if (!valid_disaster_probability || !valid_disaster_size) {
+  stop(
+    paste(
+      "Stored DGP-3 parameters do not equal",
+      "disaster_probability = 0.05 and",
+      "disaster_size = 7.5."
+    )
+  )
+}
+
+
+# 6. Required outputs must be nonempty and width-indexed outputs must
 # contain exactly the six requested half-widths.
 
 required_output_objects <- list(
@@ -1918,8 +2381,18 @@ save_run_object(
 )
 
 save_run_object(
+  forecast_scores_by_replication,
+  "forecast_scores_by_replication"
+)
+
+save_run_object(
   forecast_summary,
   "forecast_summary"
+)
+
+save_run_object(
+  forecast_plots,
+  "forecast_plots"
 )
 
 message(

@@ -1,0 +1,26 @@
+{
+    "id": "F7DD34EE",
+    "path": "~/NSERC/NSERC-project/scripts/05_make_figures.R",
+    "project_path": "scripts/05_make_figures.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1788127142889.0,
+    "source_on_save": false,
+    "relative_order": 8,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "1130,0",
+        "scrollLine": "0"
+    },
+    "folds": "6|32|76|0|\n77|35|151|0|\n152|24|237|0|\n156|27|235|0|\n238|36|272|0|\n273|33|289|0|\n290|45|465|0|\n466|53|674|0|\n675|30|794|0|\n795|52|987|0|\n988|61|1130|0|\n",
+    "lastKnownWriteTime": 1788141484,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1788141484756,
+    "read_only": false,
+    "read_only_alternatives": []
+}

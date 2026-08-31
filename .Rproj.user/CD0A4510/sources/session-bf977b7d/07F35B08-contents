@@ -1,0 +1,9 @@
+library(ggplot2)
+library(vars)
+library(dplyr)
+library(tidyr)
+
+SEED <- 12345
+set.seed(SEED)
+
+options(scipen = 999)

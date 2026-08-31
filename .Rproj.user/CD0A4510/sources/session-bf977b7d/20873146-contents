@@ -1,10 +1,15 @@
+# 8_results.R
+#
 # Load final saved Monte Carlo objects and produce publication-ready displays.
 # This script does not estimate models or rerun simulations.
 
 library(ggplot2)
 library(dplyr)
 
-# Paths and final saved results ----
+
+# Paths and final saved results ------------------------------------------------
+
+dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
 
 response_results_path <- file.path(
   "results",
@@ -75,7 +80,7 @@ disaster_coverage_summary <- readRDS(
 )
 
 
-# Verify the saved summary schemas ----
+# Verify the saved summary schemas --------------------------------------------
 
 required_response_columns <- c(
   "dgp",
@@ -150,7 +155,7 @@ if (!all(
 }
 
 
-# Reusable figure style ----
+# Reusable figure style --------------------------------------------------------
 
 theme_modal_paper <- function(
     base_size = 8.5,
@@ -236,7 +241,7 @@ theme_modal_paper <- function(
 }
 
 
-# Stable response-series aesthetics ----
+# Stable response-series aesthetics ------------------------------------------
 
 response_series_levels <- c(
   "True response",
@@ -288,7 +293,7 @@ common_target_dgp_labels <- c(
 )
 
 
-# Figure 1: common-target response functions ----
+# Figure 1: common-target response functions ---------------------------------
 
 figure1_sample_sizes <- c(
   250,
@@ -464,9 +469,14 @@ ggsave(
 )
 
 
-# Figure 2: DGP 5 distinct-target response functions ----
-
-# In the saved DGP-5 results, the truth column is estimator specific
+# Figure 2: DGP 5 distinct-target response functions --------------------------
+#
+# In the saved DGP-5 results:
+#   Mean LP and VAR target the population mean response;
+#   Median LP targets the population median response;
+#   Modal LP targets the population modal response.
+#
+# The truth column is therefore estimator-specific in this DGP.
 
 figure2_sample_sizes <- c(
   250,
@@ -673,8 +683,8 @@ ggsave(
 )
 
 
-# Figure 3: average forecasts ----
-
+# Figure 3: average forecasts ------------------------------------------
+#
 # The final saved object contains one average_forecast for each
 # DGP / sample size / estimator / forecast-horizon cell.
 
@@ -793,7 +803,8 @@ ggsave(
 )
 
 
-# Figure 4: paired fixed-width coverage differences ----
+# Figure 4-specific comparison setup ------------------------------------
+
 
 coverage_comparison_levels <- c(
   "Modal - Mean",
@@ -863,6 +874,9 @@ figure4_plot_data <- paired_coverage_summary |>
       mean_coverage_difference
   )
 
+# Interior ticks prevent labels from colliding across four-column facets.
+# All six saved half-width observations remain in the plotted lines.
+
 fixed_width_axis_breaks <- c(
   0.5,
   1.0,
@@ -879,6 +893,18 @@ fixed_width_panel_spacing <- grid::unit(
   10,
   "pt"
 )
+
+
+figure4_sample_size <- 250
+
+figure4_horizons <- c(
+  1,
+  2,
+  5,
+  10
+)
+
+# Figure 4: paired fixed-width coverage differences ---------------------------
 
 figure4_paired_coverage_differences <- ggplot(
   data = figure4_plot_data,
@@ -967,8 +993,8 @@ figure4_paired_coverage_differences <- ggplot(
   ) +
   theme_modal_paper() +
   theme(
-    panel.spacing.x = fixed_width_panel_spacing,
-    panel.spacing.y = fixed_width_panel_spacing
+    panel.spacing.x = grid::unit(10, "pt"),
+    panel.spacing.y = grid::unit(10, "pt")
   )
 
 figure4_path <- file.path(
@@ -1127,4 +1153,26 @@ ggsave(
   units = "in",
   bg = "white"
 )
+
+# Paths and final saved results ------------------------------------------------
+
+response_results_path <- file.path(
+  "results", "responses", "response_plot_data_R1000.rds"
+)
+
+figure_directory <- file.path("results", "figures")
+
+dir.create(
+  figure_directory,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+response_plot_data <- readRDS(response_results_path)
+
+required_response_columns <- c(
+  "dgp", "estimator", "sample_size", "horizon",
+  "truth", "average_estimate"
+)
+
 

@@ -1,24 +1,35 @@
+# all the modal LP sensitivity experiments
+# different bandwidth constants
+# optionally, later: different bandwidth rules entirely
+# sensitivity of MEM to different starts
+# MEM convergence/failure rates
+
 # Modal LP sensitivity Monte Carlo
 # Bandwidth constants and deterministic starting values
 # Nested samples across sample sizes
 
-source(file.path("R", "estimators.R"))
-source(file.path("R", "dgps.R"))
+source("1_estimators.R")
+source("2_dgps.R")
 
 # Sensitivity settings ----
-
-mc_seed <- 12345
-
-set.seed(mc_seed)
 
 dgp_names <- c(
   "gaussian",
   "downside_risk"
 )
 
-sample_sizes <- c(250, 500, 1000)
+sample_sizes <- c(
+  250,
+  500,
+  1000
+)
 
-horizons <- c(1, 5, 10, 20)
+horizons <- c(
+  1,
+  5,
+  10,
+  20
+)
 
 bw_constants <- c(
   1.6,
@@ -30,7 +41,7 @@ bw_constants <- c(
   6.4
 )
 
-start_experiment_bw_constant <- 1.6
+baseline_bw_constant <- 1.6
 
 start_schemes <- list(
   two_starts = 0.5,
@@ -92,7 +103,7 @@ fit_modal_once <- function(y, x, z, horizon,
 }
 
 
-# preallocate results ----
+# preallocate bandwidth-sensitivity results ----
 
 n_bandwidth_results <- length(dgp_names) *
   length(sample_sizes) *
@@ -120,6 +131,9 @@ bandwidth_sensitivity_raw <- data.frame(
 
 bandwidth_row <- 1
 
+
+# preallocate starting-value-sensitivity results ----
+
 n_start_results <- length(dgp_names) *
   length(sample_sizes) *
   n_replications *
@@ -145,18 +159,16 @@ start_sensitivity_raw <- data.frame(
   start_diagnostics = I(
     vector("list", n_start_results)
   ),
+  failure = rep(NA_character_, n_start_results),
   failure = rep(NA_character_, n_start_results)
-)
-
-start_scalar_columns <- setdiff(
-  names(start_sensitivity_raw),
-  "start_diagnostics"
 )
 
 start_row <- 1
 
 
-# bandwidth + number-of-MEM-starts sensitivity experiments ----
+# paired sensitivity experiments ----
+
+set.seed(12345)
 
 for (replication in seq_len(n_replications)) {
   
@@ -237,8 +249,8 @@ for (replication in seq_len(n_replications)) {
             reference_z = reference_z
           )
           
-          # save to reuse this exact fit in Experiment B
-          if (bw_constant == start_experiment_bw_constant) {
+          # Reuse this exact fit in Experiment B
+          if (bw_constant == baseline_bw_constant) {
             baseline_two_start_attempt <-
               bandwidth_attempt
           }
@@ -302,7 +314,7 @@ for (replication in seq_len(n_replications)) {
           x = x,
           z = z,
           horizon = horizon,
-          bw_constant = start_experiment_bw_constant,
+          bw_constant = baseline_bw_constant,
           start_quantiles =
             start_schemes$six_starts,
           reference_z = reference_z,
@@ -325,14 +337,13 @@ for (replication in seq_len(n_replications)) {
             
             start_sensitivity_raw[
               start_row,
-              start_scalar_columns
             ] <- list(
               dgp_name,
               sample_size,
               replication,
               horizon,
               start_scheme,
-              start_experiment_bw_constant,
+              baseline_bw_constant,
               NA_real_,
               NA_real_,
               truth_h,
@@ -342,11 +353,9 @@ for (replication in seq_len(n_replications)) {
               NA_integer_,
               NA_character_,
               NA_integer_,
+              list(NULL),
               conditionMessage(start_attempt)
             )
-            
-            start_sensitivity_raw$start_diagnostics[start_row] <-
-              list(NULL)
             
           } else {
             
@@ -355,14 +364,13 @@ for (replication in seq_len(n_replications)) {
             
             start_sensitivity_raw[
               start_row,
-              start_scalar_columns
             ] <- list(
               dgp_name,
               sample_size,
               replication,
               horizon,
               start_scheme,
-              start_experiment_bw_constant,
+              baseline_bw_constant,
               fit$bandwidth[1],
               estimate_h,
               truth_h,
@@ -372,11 +380,9 @@ for (replication in seq_len(n_replications)) {
               fit$iterations[1],
               fit$selected_start[1],
               fit$n_converged_starts[1],
+              list(start_attempt$start_diagnostics),
               NA_character_
             )
-            
-            start_sensitivity_raw$start_diagnostics[start_row] <-
-              list(start_attempt$start_diagnostics)
           }
           
           start_row <- start_row + 1
@@ -723,6 +729,16 @@ diagnostic_rows <- lapply(
       six_start_results$
       start_diagnostics[[i]]
     
+    # Handle an accidentally nested list-column
+    if (
+      is.list(diagnostics_i) &&
+      !is.data.frame(diagnostics_i) &&
+      length(diagnostics_i) == 1
+    ) {
+      diagnostics_i <-
+        diagnostics_i[[1]]
+    }
+    
     if (
       is.null(diagnostics_i) ||
       !is.data.frame(diagnostics_i) ||
@@ -909,16 +925,431 @@ start_diagnostics_summary <-
 
 
 
-# Add paired diagnostics----
+# Add paired diagnostics to scheme-level summary ----
 
 start_sensitivity_summary <-
-  start_scheme_summary |>
-  dplyr::arrange(
-    match(dgp, dgp_names),
+  dplyr::left_join(
+    start_scheme_summary,
+    start_pair_summary,
+    by = c(
+      "dgp",
+      "sample_size",
+      "horizon"
+    )
+  )
+
+paired_columns <- setdiff(
+  names(start_pair_summary),
+  c(
+    "dgp",
+    "sample_size",
+    "horizon"
+  )
+)
+
+start_sensitivity_summary[
+  start_sensitivity_summary$
+    start_scheme == "two_starts",
+  paired_columns
+] <- NA
+
+start_sensitivity_summary <-
+  start_sensitivity_summary[
+    order(
+      match(
+        start_sensitivity_summary$dgp,
+        dgp_names
+      ),
+      start_sensitivity_summary$
+        sample_size,
+      start_sensitivity_summary$
+        horizon,
+      match(
+        start_sensitivity_summary$
+          start_scheme,
+        names(start_schemes)
+      )
+    ),
+  ]
+
+rownames(
+  start_sensitivity_summary
+) <- NULL
+# bandwidth diagnostic plots ----
+
+plot_rmse <- ggplot(
+  bandwidth_sensitivity_summary,
+  aes(
+    x = bw_constant,
+    y = rmse,
+    colour = factor(sample_size),
+    group = factor(sample_size)
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    dgp ~ horizon,
+    scales = "free_y",
+    labeller = label_both
+  ) +
+  scale_x_continuous(
+    breaks = bw_constants
+  ) +
+  labs(
+    x = "Bandwidth constant",
+    y = "RMSE",
+    colour = "Sample size"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+
+plot_variance <- ggplot(
+  bandwidth_sensitivity_summary,
+  aes(
+    x = bw_constant,
+    y = variance,
+    colour = factor(sample_size),
+    group = factor(sample_size)
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    dgp ~ horizon,
+    scales = "free_y",
+    labeller = label_both
+  ) +
+  scale_x_continuous(
+    breaks = bw_constants
+  ) +
+  labs(
+    x = "Bandwidth constant",
+    y = "Empirical variance",
+    colour = "Sample size"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+
+plot_bias <- ggplot(
+  bandwidth_sensitivity_summary,
+  aes(
+    x = bw_constant,
+    y = bias,
+    colour = factor(sample_size),
+    group = factor(sample_size)
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    dgp ~ horizon,
+    scales = "free_y",
+    labeller = label_both
+  ) +
+  scale_x_continuous(
+    breaks = bw_constants
+  ) +
+  labs(
+    x = "Bandwidth constant",
+    y = "Bias",
+    colour = "Sample size"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+
+plot_success_rate <- ggplot(
+  bandwidth_sensitivity_summary,
+  aes(
+    x = bw_constant,
+    y = success_rate,
+    colour = factor(sample_size),
+    group = factor(sample_size)
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    dgp ~ horizon,
+    labeller = label_both
+  ) +
+  scale_x_continuous(
+    breaks = bw_constants
+  ) +
+  coord_cartesian(
+    ylim = c(0, 1)
+  ) +
+  labs(
+    x = "Bandwidth constant",
+    y = "Success rate",
+    colour = "Sample size"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+bandwidth_sensitivity_summary <-
+  bandwidth_sensitivity_summary |>
+  dplyr::mutate(
+    absolute_bias = abs(bias),
+    squared_bias = bias^2
+  )
+
+plot_absolute_bias <- ggplot(
+  bandwidth_sensitivity_summary,
+  aes(
+    x = bw_constant,
+    y = absolute_bias,
+    colour = factor(sample_size),
+    group = factor(sample_size)
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    dgp ~ horizon,
+    scales = "free_y",
+    labeller = label_both
+  ) +
+  scale_x_continuous(
+    breaks = bw_constants
+  ) +
+  labs(
+    x = "Bandwidth constant",
+    y = "Absolute bias",
+    colour = "Sample size"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+# Modal-response paths across bandwidths ----
+
+bandwidth_response_data <-
+  bandwidth_sensitivity_raw |>
+  dplyr::mutate(
+    success =
+      is.na(failure) &
+      converged %in% TRUE &
+      is.finite(estimate)
+  ) |>
+  dplyr::filter(
+    dgp == "downside_risk",
+    success
+  ) |>
+  dplyr::group_by(
     sample_size,
     horizon,
-    match(start_scheme, names(start_schemes))
+    bw_constant
+  ) |>
+  dplyr::summarise(
+    average_estimate =
+      mean(estimate),
+    truth =
+      dplyr::first(truth),
+    .groups = "drop"
   )
+
+bandwidth_truth <-
+  bandwidth_response_data |>
+  dplyr::distinct(
+    sample_size,
+    horizon,
+    truth
+  )
+
+plot_bandwidth_response <- ggplot(
+  bandwidth_response_data,
+  aes(
+    x = horizon,
+    y = average_estimate,
+    colour = factor(bw_constant),
+    group = factor(bw_constant)
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linewidth = 0.4
+  ) +
+  geom_line(
+    linewidth = 0.9
+  ) +
+  geom_point(
+    size = 1.8
+  ) +
+  geom_line(
+    data = bandwidth_truth,
+    aes(
+      x = horizon,
+      y = truth
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.9
+  ) +
+  geom_point(
+    data = bandwidth_truth,
+    aes(
+      x = horizon,
+      y = truth
+    ),
+    inherit.aes = FALSE,
+    size = 1.8
+  ) +
+  facet_wrap(
+    ~ sample_size,
+    nrow = 1
+  ) +
+  scale_x_continuous(
+    breaks = horizons
+  ) +
+  scale_colour_brewer(
+    palette = "Dark2"
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Modal response",
+    colour = "Bandwidth constant"
+  ) +
+  theme_minimal()
+
+# two-start versus six-start diagnostic plot ----
+
+start_pair_plot_data <-
+  start_pair_summary |>
+  dplyr::select(
+    dgp,
+    sample_size,
+    horizon,
+    higher_objective_rate,
+    material_estimate_difference_rate,
+    new_solution_rate
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(
+      higher_objective_rate,
+      material_estimate_difference_rate,
+      new_solution_rate
+    ),
+    names_to = "diagnostic",
+    values_to = "rate"
+  )
+
+plot_start_pair <- ggplot(
+  start_pair_plot_data,
+  aes(
+    x = horizon,
+    y = rate,
+    colour = factor(sample_size),
+    group = factor(sample_size)
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    dgp ~ diagnostic,
+    labeller = label_both
+  ) +
+  coord_cartesian(
+    ylim = c(0, 1)
+  ) +
+  labs(
+    x = "Horizon",
+    y = "Rate",
+    colour = "Sample size"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+start_diagnostics_summary <-
+  start_diagnostics_summary |>
+  dplyr::mutate(
+    start = factor(
+      start,
+      levels = c(
+        "ols",
+        "q10",
+        "q25",
+        "median",
+        "q75",
+        "q90"
+      )
+    )
+  )
+
+start_selection_plot_data <-
+  start_diagnostics_summary |>
+  dplyr::select(
+    dgp,
+    sample_size,
+    horizon,
+    start,
+    selection_rate,
+    tied_best_rate
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(
+      selection_rate,
+      tied_best_rate
+    ),
+    names_to = "diagnostic",
+    values_to = "rate"
+  )
+
+plot_start_selection <- ggplot(
+  start_selection_plot_data,
+  aes(
+    x = start,
+    y = rate,
+    colour = diagnostic,
+    group = diagnostic
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    dgp + sample_size ~ horizon,
+    labeller = label_both
+  ) +
+  coord_cartesian(
+    ylim = c(0, 1)
+  ) +
+  labs(
+    x = "Starting value",
+    y = "Rate",
+    colour = "Diagnostic"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+sensitivity_plots <- list(
+  rmse = plot_rmse,
+  variance = plot_variance,
+  bias = plot_bias,
+  absolute_bias = plot_absolute_bias,
+  success_rate = plot_success_rate,
+  start_pair = plot_start_pair,
+  start_selection = plot_start_selection
+)
 
 # save results ----
 
@@ -937,30 +1368,6 @@ run_label <- paste0(
   "R",
   n_replications,
   "_bw_extended"
-)
-
-sensitivity_run_settings <- list(
-  dgp_names = dgp_names,
-  sample_sizes = sample_sizes,
-  horizons = horizons,
-  bw_constants = bw_constants,
-  start_experiment_bw_constant = start_experiment_bw_constant,
-  start_schemes = start_schemes,
-  n_replications = n_replications,
-  mc_seed = mc_seed,
-  session_info = utils::sessionInfo(),
-)
-
-saveRDS(
-  sensitivity_run_settings,
-  file.path(
-    results_directory,
-    paste0(
-      "sensitivity_run_settings_",
-      run_label,
-      ".rds"
-    )
-  )
 )
 
 saveRDS(
@@ -1005,18 +1412,6 @@ saveRDS(
     results_directory,
     paste0(
       "start_sensitivity_summary_",
-      run_label,
-      ".rds"
-    )
-  )
-)
-
-saveRDS(
-  start_pair_summary,
-  file.path(
-    results_directory,
-    paste0(
-      "start_pair_summary_",
       run_label,
       ".rds"
     )

@@ -1,0 +1,26 @@
+{
+    "id": "F3819D97",
+    "path": "~/NSERC/NSERC-project/R/estimators.R",
+    "project_path": "R/estimators.R",
+    "type": "r_source",
+    "hash": "2261156769",
+    "contents": "",
+    "dirty": false,
+    "created": 1788127171671.0,
+    "source_on_save": false,
+    "relative_order": 2,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "776,0",
+        "scrollLine": "700"
+    },
+    "folds": "1|49|67|0|\n8|23|10|2|\n70|48|137|0|\n139|60|168|0|\n179|40|210|2|\n247|40|282|2|\n311|58|322|0|\n327|39|419|0|\n503|21|510|6|\n532|29|543|6|\n549|21|552|6|\n579|23|584|8|\n683|19|692|6|\n776|46|811|0|\n",
+    "lastKnownWriteTime": 1788134052,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1788134052267,
+    "read_only": false,
+    "read_only_alternatives": []
+}

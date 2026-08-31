@@ -1,0 +1,26 @@
+{
+    "id": "93384724",
+    "path": "~/NSERC/NSERC-project/scripts/01_sensitivity.R",
+    "project_path": "scripts/01_sensitivity.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1788127009040.0,
+    "source_on_save": false,
+    "relative_order": 3,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "939,0",
+        "scrollLine": "907"
+    },
+    "folds": "785|25|795|8|\n",
+    "lastKnownWriteTime": 1788143334,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1788143334548,
+    "read_only": false,
+    "read_only_alternatives": []
+}

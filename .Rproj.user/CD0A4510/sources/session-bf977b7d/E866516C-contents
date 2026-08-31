@@ -1,4 +1,17 @@
+# all estimation functions: prediction and response functions
+# LMP/MEM estimator with multi-start, stopping rule, and bandwidth calculation
+# mean LP and IRFs
+# median/quantile LP and RFs
+# VARs and RFs
+
+# estimators take arguments y, x, optionally z, and horizons
+# estimators return horizons, n_h for each h, coefficients, beta
+# then just have one generic LP IRF function. arguments: fitted model, delta
+
+source("0_setup.R")
+
 #construct horizon-h LP data
+
 .prepare_lp_data <- function(y, x, z = NULL, h) {
   
   # input checks
@@ -34,13 +47,9 @@
       colnames(z) <- paste0("z", seq_len(ncol(z)))
     }
   }
-
-  if (
-    any(!is.finite(y)) ||
-    any(!is.finite(x)) ||
-    any(!is.finite(z))
-  ) {
-    stop("Missing/non-finite values are not supported.")
+  
+  if (anyNA(y) || anyNA(x) || anyNA(z)) {
+    stop("Missing values are not currently supported.")
   }
   
   n_h <- T - h
@@ -68,6 +77,7 @@
 }
 
 # LP prediction and response function. Works for any LP
+
 lp_predict <- function(fitted_lp, x, z = NULL) {
   
   coefficients <- fitted_lp$coefficients
@@ -169,6 +179,7 @@ lp_response <- function(fitted_lp, x, z = NULL, delta = 1) {
 }
 
 # Mean Local Projection
+
 fit_mean_lp <- function(y, x, z = NULL, horizons) {
   
   horizons <- sort(unique(horizons))
@@ -227,16 +238,19 @@ fit_mean_lp <- function(y, x, z = NULL, horizons) {
     numeric(1)
   )
   
-  list(
+  out <- list(
     method = "mean_lp",
     horizons = horizons,
     n_h = n_h,
     coefficients = coefficients,
     beta = beta
   )
+  
+  out
 }
 
 # Median local projection
+
 fit_median_lp <- function(y, x, z = NULL, horizons) {
   
   horizons <- sort(unique(horizons))
@@ -309,6 +323,7 @@ fit_median_lp <- function(y, x, z = NULL, horizons) {
 }
 
 # Modal local projection
+
 .modal_objective <- function(theta, y_h, D_h, bandwidth) {
   
   if (bandwidth <= 0) {
@@ -437,16 +452,6 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
     stop("bw_constant must be positive and finite.")
   }
   
-  if (
-    length(start_quantiles) == 0 ||
-    any(!is.finite(start_quantiles)) ||
-    any(start_quantiles <= 0 | start_quantiles >= 1)
-  ) {
-    stop("start_quantiles must lie strictly between zero and one.")
-  }
-  
-  start_quantiles <- sort(unique(start_quantiles))
-  
   fits <- lapply(horizons, function(h) {
     
     dat <- .prepare_lp_data(
@@ -496,6 +501,16 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
         )
       )
     }
+    
+    if (
+      length(start_quantiles) == 0 ||
+      any(!is.finite(start_quantiles)) ||
+      any(start_quantiles <= 0 | start_quantiles >= 1)
+    ) {
+      stop("start_quantiles must lie strictly between zero and one.")
+    }
+    
+    start_quantiles <- sort(unique(start_quantiles))
 
     # quantile-regression starting values
     
@@ -585,6 +600,12 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
         }
       )
     }
+    
+    #could maybe make it so the function doesn't totally stop just because
+    #none of the runs converged at horizon h. Maybe better to recover
+    #all the horizon estimates we can and note which ones failed.
+    
+    #zero convergences probably won't ever be a problem, though
     
     if (!any(converged)) {
       stop(
@@ -713,6 +734,7 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
 
 # Mean VAR: fit, prediction, and response function (assumes x is an
 # observed shock variable)
+
 fit_var <- function(data, lags, type = "const") {
   
   data <- as.matrix(data)
@@ -799,7 +821,7 @@ var_response <- function(fitted_var, shock, response,
   
   # response, here, gets the coefficients mapping the reduced-form
   # innovation of size \delta in x at time t to the value of y 
-  # at h = 1, ..., H)
+  # at h = 0, 1, ..., H)
   
   data.frame(
     horizon = horizons,
