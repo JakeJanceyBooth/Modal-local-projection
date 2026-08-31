@@ -5,11 +5,8 @@ library(ggplot2)
 library(dplyr)
 
 # Paths and final saved results ----
-
 response_results_path <- file.path(
-  "results",
-  "responses",
-  "response_plot_data_R1000.rds"
+  "results", "responses", "response_plot_data_R1000.rds"
 )
 
 forecast_run_label <- paste0(
@@ -18,65 +15,29 @@ forecast_run_label <- paste0(
 )
 
 average_forecast_results_path <- file.path(
-  "results",
-  "forecasting",
-  paste0(
-    "average_forecast_summary_",
-    forecast_run_label,
-    ".rds"
-  )
+  "results", "forecasting",
+  paste0("average_forecast_summary_", forecast_run_label, ".rds")
 )
 
 paired_coverage_results_path <- file.path(
-  "results",
-  "forecasting",
-  paste0(
-    "paired_coverage_summary_",
-    forecast_run_label,
-    ".rds"
-  )
+  "results", "forecasting",
+  paste0("paired_coverage_summary_", forecast_run_label, ".rds")
 )
 
 disaster_coverage_results_path <- file.path(
-  "results",
-  "forecasting",
-  paste0(
-    "disaster_coverage_summary_",
-    forecast_run_label,
-    ".rds"
-  )
+  "results", "forecasting",
+  paste0("disaster_coverage_summary_", forecast_run_label, ".rds")
 )
 
-figure_directory <- file.path(
-  "results",
-  "figures"
-)
+figure_directory <- file.path("results", "figures")
+dir.create(figure_directory, recursive = TRUE, showWarnings = FALSE)
 
-dir.create(
-  figure_directory,
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
-response_plot_data <- readRDS(
-  response_results_path
-)
-
-average_forecast_summary <- readRDS(
-  average_forecast_results_path
-)
-
-paired_coverage_summary <- readRDS(
-  paired_coverage_results_path
-)
-
-disaster_coverage_summary <- readRDS(
-  disaster_coverage_results_path
-)
-
+response_plot_data <- readRDS(response_results_path)
+average_forecast_summary <- readRDS(average_forecast_results_path)
+paired_coverage_summary <- readRDS(paired_coverage_results_path)
+disaster_coverage_summary <- readRDS(disaster_coverage_results_path)
 
 # Verify the saved summary schemas ----
-
 required_response_columns <- c(
   "dgp",
   "estimator",
@@ -86,13 +47,8 @@ required_response_columns <- c(
   "average_estimate"
 )
 
-if (!all(
-  required_response_columns %in%
-  names(response_plot_data)
-)) {
-  stop(
-    "The final response plotting object has unexpected columns."
-  )
+if (!all(required_response_columns %in% names(response_plot_data))) {
+  stop("The final response plotting object has unexpected columns.")
 }
 
 required_average_forecast_columns <- c(
@@ -103,13 +59,9 @@ required_average_forecast_columns <- c(
   "average_forecast"
 )
 
-if (!all(
-  required_average_forecast_columns %in%
-  names(average_forecast_summary)
-)) {
-  stop(
-    "The final average-forecast summary has unexpected columns."
-  )
+if (!all(required_average_forecast_columns %in%
+         names(average_forecast_summary))) {
+  stop("The final average-forecast summary has unexpected columns.")
 }
 
 required_paired_coverage_columns <- c(
@@ -121,13 +73,9 @@ required_paired_coverage_columns <- c(
   "mean_coverage_difference"
 )
 
-if (!all(
-  required_paired_coverage_columns %in%
-  names(paired_coverage_summary)
-)) {
-  stop(
-    "The final paired-coverage summary has unexpected columns."
-  )
+if (!all(required_paired_coverage_columns %in%
+         names(paired_coverage_summary))) {
+  stop("The final paired-coverage summary has unexpected columns.")
 }
 
 required_disaster_coverage_columns <- c(
@@ -140,104 +88,58 @@ required_disaster_coverage_columns <- c(
   "mean_coverage"
 )
 
-if (!all(
-  required_disaster_coverage_columns %in%
-  names(disaster_coverage_summary)
-)) {
-  stop(
-    "The final disaster-coverage summary has unexpected columns."
-  )
+if (!all(required_disaster_coverage_columns %in%
+         names(disaster_coverage_summary))) {
+  stop("The final disaster-coverage summary has unexpected columns.")
 }
 
-
 # Reusable figure style ----
-
-theme_modal_paper <- function(
-    base_size = 8.5,
-    base_family = "sans") {
-  theme_classic(
-    base_size = base_size,
-    base_family = base_family
-  ) %+replace%
+theme_modal_paper <- function(base_size = 8.5, base_family = "sans") {
+  theme_classic(base_size = base_size, base_family = base_family) %+replace%
     theme(
       plot.title = element_blank(),
       plot.subtitle = element_blank(),
       plot.caption = element_blank(),
-      
-      panel.background = element_rect(
-        fill = "white",
-        colour = NA
-      ),
+
+      panel.background = element_rect(fill = "white", colour = NA),
       panel.grid = element_blank(),
       panel.border = element_rect(
         fill = NA,
         colour = "black",
         linewidth = 0.22
       ),
-      
+
       axis.line = element_blank(),
-      axis.text = element_text(
-        colour = "black"
-      ),
-      axis.title = element_text(
-        colour = "black",
-        size = rel(1)
-      ),
-      axis.ticks = element_line(
-        colour = "black",
-        linewidth = 0.20
-      ),
-      axis.ticks.length = grid::unit(
-        2.5,
-        "pt"
-      ),
-      
+      axis.text = element_text(colour = "black"),
+      axis.title = element_text(colour = "black", size = rel(1)),
+      axis.ticks = element_line(colour = "black", linewidth = 0.20),
+      axis.ticks.length = grid::unit(2.5, "pt"),
+
       strip.background = element_blank(),
-      strip.text = element_text(
-        colour = "black",
-        face = "plain"
-      ),
-      strip.text.x = element_text(
-        margin = margin(b = 3)
-      ),
+      strip.text = element_text(colour = "black", face = "plain"),
+      strip.text.x = element_text(margin = margin(b = 3)),
       strip.text.y.left = element_text(
         angle = 0,
         hjust = 1,
         margin = margin(r = 4)
       ),
       strip.placement = "outside",
-      panel.spacing = grid::unit(
-        6,
-        "pt"
-      ),
-      
+      panel.spacing = grid::unit(6, "pt"),
+
       legend.position = "bottom",
       legend.direction = "horizontal",
       legend.justification = "center",
       legend.title = element_blank(),
       legend.key = element_blank(),
-      legend.key.width = grid::unit(
-        18,
-        "pt"
-      ),
-      legend.spacing.x = grid::unit(
-        5,
-        "pt"
-      ),
+      legend.key.width = grid::unit(18, "pt"),
+      legend.spacing.x = grid::unit(5, "pt"),
       legend.margin = margin(t = 3),
-      
-      plot.margin = margin(
-        t = 3,
-        r = 4,
-        b = 2,
-        l = 2
-      )
+
+      plot.margin = margin(t = 3, r = 4, b = 2, l = 2)
     )
 }
 
-
 # Stable response-series aesthetics ----
-
 response_series_levels <- c(
   "True response",
   "Mean LP",
@@ -272,14 +174,7 @@ response_series_linewidths <- c(
 )
 
 # Common DGP ordering and labels ----------------------------------------------
-
-common_target_dgps <- c(
-  "gaussian",
-  "skewed",
-  "disaster",
-  "rich_state"
-)
-
+common_target_dgps <- c("gaussian", "skewed", "disaster", "rich_state")
 common_target_dgp_labels <- c(
   "gaussian" = "Gaussian",
   "skewed" = "Skewed",
@@ -287,15 +182,8 @@ common_target_dgp_labels <- c(
   "rich_state" = "Rich state"
 )
 
-
 # Figure 1: common-target response functions ----
-
-figure1_sample_sizes <- c(
-  250,
-  500,
-  1000
-)
-
+figure1_sample_sizes <- c(250, 500, 1000)
 common_target_plot_data <- response_plot_data |>
   filter(
     dgp %in% common_target_dgps,
@@ -304,26 +192,14 @@ common_target_plot_data <- response_plot_data |>
   ) |>
   mutate(
     dgp_label = factor(
-      unname(
-        common_target_dgp_labels[dgp]
-      ),
-      levels = unname(
-        common_target_dgp_labels[
-          common_target_dgps
-        ]
-      )
+      unname(common_target_dgp_labels[dgp]),
+      levels = unname(common_target_dgp_labels[common_target_dgps])
     ),
     sample_size_label = factor(
       paste0("T = ", sample_size),
-      levels = paste0(
-        "T = ",
-        figure1_sample_sizes
-      )
+      levels = paste0("T = ", figure1_sample_sizes)
     ),
-    estimator = factor(
-      estimator,
-      levels = response_series_levels[-1]
-    )
+    estimator = factor(estimator, levels = response_series_levels[-1])
   )
 
 # The population response is common across estimators in these four DGPs.
@@ -338,10 +214,7 @@ figure1_truth_data <- common_target_plot_data |>
     dgp_label,
     sample_size_label,
     horizon,
-    series = factor(
-      "True response",
-      levels = response_series_levels
-    ),
+    series = factor("True response", levels = response_series_levels),
     response = truth
   )
 
@@ -350,10 +223,7 @@ figure1_estimate_data <- common_target_plot_data |>
     dgp_label,
     sample_size_label,
     horizon,
-    series = factor(
-      as.character(estimator),
-      levels = response_series_levels
-    ),
+    series = factor(as.character(estimator), levels = response_series_levels),
     response = average_estimate
   )
 
@@ -367,19 +237,9 @@ figure1_common_target_responses <- ggplot(
     linewidth = series
   )
 ) +
-  geom_hline(
-    yintercept = 0,
-    colour = "grey65",
-    linewidth = 0.20
-  ) +
-  geom_line(
-    data = figure1_truth_data,
-    lineend = "round"
-  ) +
-  geom_line(
-    data = figure1_estimate_data,
-    lineend = "round"
-  ) +
+  geom_hline(yintercept = 0, colour = "grey65", linewidth = 0.20) +
+  geom_line(data = figure1_truth_data, lineend = "round") +
+  geom_line(data = figure1_estimate_data, lineend = "round") +
   facet_grid(
     rows = vars(dgp_label),
     cols = vars(sample_size_label),
@@ -403,55 +263,23 @@ figure1_common_target_responses <- ggplot(
   scale_x_continuous(
     breaks = c(1, 5, 10, 15, 20),
     minor_breaks = NULL,
-    expand = expansion(
-      mult = c(0.01, 0.02)
-    )
+    expand = expansion(mult = c(0.01, 0.02))
   ) +
   scale_y_continuous(
-    breaks = c(
-      0,
-      0.25,
-      0.50,
-      0.75,
-      1.00
-    ),
-    labels = c(
-      "0",
-      "0.25",
-      "0.50",
-      "0.75",
-      "1.00"
-    ),
+    breaks = c(0, 0.25, 0.50, 0.75, 1.00),
+    labels = c("0", "0.25", "0.50", "0.75", "1.00"),
     minor_breaks = NULL,
-    expand = expansion(
-      mult = c(0.01, 0.01)
-    )
+    expand = expansion(mult = c(0.01, 0.01))
   ) +
-  coord_cartesian(
-    ylim = c(-0.05, 1.05)
-  ) +
-  labs(
-    x = "Horizon",
-    y = "Response",
-    colour = NULL,
-    linetype = NULL
-  ) +
+  coord_cartesian(ylim = c(-0.05, 1.05)) +
+  labs(x = "Horizon", y = "Response", colour = NULL, linetype = NULL) +
   guides(
-    colour = guide_legend(
-      nrow = 1,
-      byrow = TRUE
-    ),
-    linetype = guide_legend(
-      nrow = 1,
-      byrow = TRUE
-    )
+    colour = guide_legend(nrow = 1, byrow = TRUE),
+    linetype = guide_legend(nrow = 1, byrow = TRUE)
   ) +
   theme_modal_paper()
 
-figure1_path <- file.path(
-  figure_directory,
-  "fig_common_target_responses.pdf"
-)
+figure1_path <- file.path(figure_directory, "fig_common_target_responses.pdf")
 
 ggsave(
   filename = figure1_path,
@@ -463,23 +291,10 @@ ggsave(
   bg = "white"
 )
 
-
 # Figure 2: DGP 5 distinct-target response functions ----
-
 # In the saved DGP-5 results, the truth column is estimator specific
-
-figure2_sample_sizes <- c(
-  250,
-  500,
-  1000
-)
-
-figure2_target_levels <- c(
-  "Mean target",
-  "Median target",
-  "Modal target"
-)
-
+figure2_sample_sizes <- c(250, 500, 1000)
+figure2_target_levels <- c("Mean target", "Median target", "Modal target")
 figure2_target_by_estimator <- c(
   "Mean LP" = "Mean target",
   "VAR" = "Mean target",
@@ -495,24 +310,14 @@ figure2_plot_data <- response_plot_data |>
   ) |>
   mutate(
     target_label = factor(
-      unname(
-        figure2_target_by_estimator[
-          as.character(estimator)
-        ]
-      ),
+      unname(figure2_target_by_estimator[as.character(estimator)]),
       levels = figure2_target_levels
     ),
     sample_size_label = factor(
       paste0("T = ", sample_size),
-      levels = paste0(
-        "T = ",
-        figure2_sample_sizes
-      )
+      levels = paste0("T = ", figure2_sample_sizes)
     ),
-    estimator = factor(
-      estimator,
-      levels = response_series_levels[-1]
-    )
+    estimator = factor(estimator, levels = response_series_levels[-1])
   )
 
 # This also verifies that the Mean-LP and VAR truth entries coincide.
@@ -522,14 +327,9 @@ figure2_truth_check <- figure2_plot_data |>
     sample_size_label,
     horizon
   ) |>
-  summarise(
-    n_truth_values = n_distinct(truth),
-    .groups = "drop"
-  )
+  summarise(n_truth_values = n_distinct(truth), .groups = "drop")
 
-if (any(
-  figure2_truth_check$n_truth_values != 1L
-)) {
+if (any(figure2_truth_check$n_truth_values != 1L)) {
   stop(
     paste(
       "The saved DGP-5 truth values do not agree",
@@ -549,10 +349,7 @@ figure2_truth_data <- figure2_plot_data |>
     target_label,
     sample_size_label,
     horizon,
-    series = factor(
-      "True response",
-      levels = response_series_levels
-    ),
+    series = factor("True response", levels = response_series_levels),
     response = truth
   )
 
@@ -561,10 +358,7 @@ figure2_estimate_data <- figure2_plot_data |>
     target_label,
     sample_size_label,
     horizon,
-    series = factor(
-      as.character(estimator),
-      levels = response_series_levels
-    ),
+    series = factor(as.character(estimator), levels = response_series_levels),
     response = average_estimate
   )
 
@@ -578,19 +372,9 @@ figure2_distinct_target_responses <- ggplot(
     linewidth = series
   )
 ) +
-  geom_hline(
-    yintercept = 0,
-    colour = "grey65",
-    linewidth = 0.20
-  ) +
-  geom_line(
-    data = figure2_truth_data,
-    lineend = "round"
-  ) +
-  geom_line(
-    data = figure2_estimate_data,
-    lineend = "round"
-  ) +
+  geom_hline(yintercept = 0, colour = "grey65", linewidth = 0.20) +
+  geom_line(data = figure2_truth_data, lineend = "round") +
+  geom_line(data = figure2_estimate_data, lineend = "round") +
   facet_grid(
     rows = vars(target_label),
     cols = vars(sample_size_label),
@@ -614,53 +398,23 @@ figure2_distinct_target_responses <- ggplot(
   scale_x_continuous(
     breaks = c(1, 5, 10, 15, 20),
     minor_breaks = NULL,
-    expand = expansion(
-      mult = c(0.01, 0.02)
-    )
+    expand = expansion(mult = c(0.01, 0.02))
   ) +
   scale_y_continuous(
-    breaks = c(
-      -0.15,
-      -0.10,
-      -0.05,
-      0
-    ),
-    labels = c(
-      "-0.15",
-      "-0.10",
-      "-0.05",
-      "0"
-    ),
+    breaks = c(-0.15, -0.10, -0.05, 0),
+    labels = c("-0.15", "-0.10", "-0.05", "0"),
     minor_breaks = NULL,
-    expand = expansion(
-      mult = c(0.01, 0.01)
-    )
+    expand = expansion(mult = c(0.01, 0.01))
   ) +
-  coord_cartesian(
-    ylim = c(-0.15, 0.01)
-  ) +
-  labs(
-    x = "Horizon",
-    y = "Response",
-    colour = NULL,
-    linetype = NULL
-  ) +
+  coord_cartesian(ylim = c(-0.15, 0.01)) +
+  labs(x = "Horizon", y = "Response", colour = NULL, linetype = NULL) +
   guides(
-    colour = guide_legend(
-      nrow = 1,
-      byrow = TRUE
-    ),
-    linetype = guide_legend(
-      nrow = 1,
-      byrow = TRUE
-    )
+    colour = guide_legend(nrow = 1, byrow = TRUE),
+    linetype = guide_legend(nrow = 1, byrow = TRUE)
   ) +
   theme_modal_paper()
 
-figure2_path <- file.path(
-  figure_directory,
-  "fig_distinct_target_responses.pdf"
-)
+figure2_path <- file.path(figure_directory, "fig_distinct_target_responses.pdf")
 
 ggsave(
   filename = figure2_path,
@@ -672,21 +426,11 @@ ggsave(
   bg = "white"
 )
 
-
 # Figure 3: average forecasts ----
-
 # The final saved object contains one average_forecast for each
 # DGP / sample size / estimator / forecast-horizon cell.
-
 figure3_sample_size <- 250
-
-figure3_horizons <- c(
-  1,
-  2,
-  5,
-  10
-)
-
+figure3_horizons <- c(1, 2, 5, 10)
 figure3_plot_data <- average_forecast_summary |>
   filter(
     sample_size == figure3_sample_size,
@@ -695,20 +439,11 @@ figure3_plot_data <- average_forecast_summary |>
   ) |>
   transmute(
     dgp_label = factor(
-      unname(
-        common_target_dgp_labels[dgp]
-      ),
-      levels = unname(
-        common_target_dgp_labels[
-          common_target_dgps
-        ]
-      )
+      unname(common_target_dgp_labels[dgp]),
+      levels = unname(common_target_dgp_labels[common_target_dgps])
     ),
     horizon,
-    series = factor(
-      estimator,
-      levels = response_series_levels[-1]
-    ),
+    series = factor(estimator, levels = response_series_levels[-1]),
     average_forecast
   )
 
@@ -723,14 +458,8 @@ figure3_average_forecasts <- ggplot(
     linewidth = series
   )
 ) +
-  geom_line(
-    lineend = "round"
-  ) +
-  facet_wrap(
-    vars(dgp_label),
-    ncol = 2,
-    scales = "free_y"
-  ) +
+  geom_line(lineend = "round") +
+  facet_wrap(vars(dgp_label), ncol = 2, scales = "free_y") +
   scale_colour_manual(
     values = response_series_colours,
     breaks = response_series_levels[-1],
@@ -749,15 +478,11 @@ figure3_average_forecasts <- ggplot(
   scale_x_continuous(
     breaks = figure3_horizons,
     minor_breaks = NULL,
-    expand = expansion(
-      mult = c(0.01, 0.02)
-    )
+    expand = expansion(mult = c(0.01, 0.02))
   ) +
   scale_y_continuous(
     minor_breaks = NULL,
-    expand = expansion(
-      mult = c(0.08, 0.08)
-    )
+    expand = expansion(mult = c(0.08, 0.08))
   ) +
   labs(
     x = "Forecast horizon",
@@ -766,21 +491,12 @@ figure3_average_forecasts <- ggplot(
     linetype = NULL
   ) +
   guides(
-    colour = guide_legend(
-      nrow = 1,
-      byrow = TRUE
-    ),
-    linetype = guide_legend(
-      nrow = 1,
-      byrow = TRUE
-    )
+    colour = guide_legend(nrow = 1, byrow = TRUE),
+    linetype = guide_legend(nrow = 1, byrow = TRUE)
   ) +
   theme_modal_paper()
 
-figure3_path <- file.path(
-  figure_directory,
-  "fig_average_forecasts.pdf"
-)
+figure3_path <- file.path(figure_directory, "fig_average_forecasts.pdf")
 
 ggsave(
   filename = figure3_path,
@@ -792,14 +508,8 @@ ggsave(
   bg = "white"
 )
 
-
 # Figure 4: paired fixed-width coverage differences ----
-
-coverage_comparison_levels <- c(
-  "Modal - Mean",
-  "Modal - Median"
-)
-
+coverage_comparison_levels <- c("Modal - Mean", "Modal - Median")
 coverage_comparison_labels <- c(
   "Modal - Mean" = "Modal LP - Mean LP",
   "Modal - Median" = "Modal LP - Median LP"
@@ -821,14 +531,7 @@ coverage_comparison_linewidths <- c(
 )
 
 figure4_sample_size <- 250
-
-figure4_horizons <- c(
-  1,
-  2,
-  5,
-  10
-)
-
+figure4_horizons <- c(1, 2, 5, 10)
 figure4_plot_data <- paired_coverage_summary |>
   filter(
     sample_size == figure4_sample_size,
@@ -838,48 +541,21 @@ figure4_plot_data <- paired_coverage_summary |>
   ) |>
   transmute(
     dgp_label = factor(
-      unname(
-        common_target_dgp_labels[dgp]
-      ),
-      levels = unname(
-        common_target_dgp_labels[
-          common_target_dgps
-        ]
-      )
+      unname(common_target_dgp_labels[dgp]),
+      levels = unname(common_target_dgp_labels[common_target_dgps])
     ),
     horizon_label = factor(
       paste0("h = ", horizon),
-      levels = paste0(
-        "h = ",
-        figure4_horizons
-      )
+      levels = paste0("h = ", figure4_horizons)
     ),
-    comparison = factor(
-      comparison,
-      levels = coverage_comparison_levels
-    ),
+    comparison = factor(comparison, levels = coverage_comparison_levels),
     half_width,
-    coverage_difference =
-      mean_coverage_difference
+    coverage_difference = mean_coverage_difference
   )
 
-fixed_width_axis_breaks <- c(
-  0.5,
-  1.0,
-  1.5
-)
-
-fixed_width_axis_labels <- c(
-  "0.5",
-  "1",
-  "1.5"
-)
-
-fixed_width_panel_spacing <- grid::unit(
-  10,
-  "pt"
-)
-
+fixed_width_axis_breaks <- c(0.5, 1.0, 1.5)
+fixed_width_axis_labels <- c("0.5", "1", "1.5")
+fixed_width_panel_spacing <- grid::unit(10, "pt")
 figure4_paired_coverage_differences <- ggplot(
   data = figure4_plot_data,
   mapping = aes(
@@ -891,19 +567,9 @@ figure4_paired_coverage_differences <- ggplot(
     linewidth = comparison
   )
 ) +
-  geom_hline(
-    yintercept = 0,
-    colour = "grey55",
-    linewidth = 0.25
-  ) +
-  geom_line(
-    lineend = "round"
-  ) +
-  facet_grid(
-    rows = vars(dgp_label),
-    cols = vars(horizon_label),
-    switch = "y"
-  ) +
+  geom_hline(yintercept = 0, colour = "grey55", linewidth = 0.25) +
+  geom_line(lineend = "round") +
+  facet_grid(rows = vars(dgp_label), cols = vars(horizon_label), switch = "y") +
   scale_colour_manual(
     values = coverage_comparison_colours,
     breaks = coverage_comparison_levels,
@@ -925,30 +591,15 @@ figure4_paired_coverage_differences <- ggplot(
     breaks = fixed_width_axis_breaks,
     labels = fixed_width_axis_labels,
     minor_breaks = NULL,
-    expand = expansion(
-      mult = c(0.01, 0.01)
-    )
+    expand = expansion(mult = c(0.01, 0.01))
   ) +
   scale_y_continuous(
-    breaks = c(
-      -0.04,
-      0,
-      0.04
-    ),
-    labels = c(
-      "-0.04",
-      "0",
-      "0.04"
-    ),
+    breaks = c(-0.04, 0, 0.04),
+    labels = c("-0.04", "0", "0.04"),
     minor_breaks = NULL,
-    expand = expansion(
-      mult = c(0, 0)
-    )
+    expand = expansion(mult = c(0, 0))
   ) +
-  coord_cartesian(
-    xlim = c(0.25, 2.00),
-    ylim = c(-0.08, 0.08)
-  ) +
+  coord_cartesian(xlim = c(0.25, 2.00), ylim = c(-0.08, 0.08)) +
   labs(
     x = "Interval half-width",
     y = "Coverage difference",
@@ -956,14 +607,8 @@ figure4_paired_coverage_differences <- ggplot(
     linetype = NULL
   ) +
   guides(
-    colour = guide_legend(
-      nrow = 1,
-      byrow = TRUE
-    ),
-    linetype = guide_legend(
-      nrow = 1,
-      byrow = TRUE
-    )
+    colour = guide_legend(nrow = 1, byrow = TRUE),
+    linetype = guide_legend(nrow = 1, byrow = TRUE)
   ) +
   theme_modal_paper() +
   theme(
@@ -987,16 +632,8 @@ ggsave(
 )
 
 # Figure 5: rare-disaster conditional coverage decomposition ------------------
-
 figure5_sample_size <- 250
-
-figure5_horizons <- c(
-  1,
-  2,
-  5,
-  10
-)
-
+figure5_horizons <- c(1, 2, 5, 10)
 figure5_plot_data <- disaster_coverage_summary |>
   filter(
     sample_size == figure5_sample_size,
@@ -1006,23 +643,14 @@ figure5_plot_data <- disaster_coverage_summary |>
   transmute(
     disaster_path_label = factor(
       disaster_path,
-      levels = c(
-        "No disaster",
-        "At least one disaster"
-      )
+      levels = c("No disaster", "At least one disaster")
     ),
     horizon_label = factor(
       paste0("h = ", horizon),
-      levels = paste0(
-        "h = ",
-        figure5_horizons
-      )
+      levels = paste0("h = ", figure5_horizons)
     ),
     half_width,
-    series = factor(
-      estimator,
-      levels = response_series_levels[-1]
-    ),
+    series = factor(estimator, levels = response_series_levels[-1]),
     conditional_coverage = mean_coverage
   )
 
@@ -1037,9 +665,7 @@ figure5_disaster_coverage_decomposition <- ggplot(
     linewidth = series
   )
 ) +
-  geom_line(
-    lineend = "round"
-  ) +
+  geom_line(lineend = "round") +
   facet_grid(
     rows = vars(disaster_path_label),
     cols = vars(horizon_label),
@@ -1064,34 +690,15 @@ figure5_disaster_coverage_decomposition <- ggplot(
     breaks = fixed_width_axis_breaks,
     labels = fixed_width_axis_labels,
     minor_breaks = NULL,
-    expand = expansion(
-      mult = c(0.01, 0.01)
-    )
+    expand = expansion(mult = c(0.01, 0.01))
   ) +
   scale_y_continuous(
-    breaks = c(
-      0,
-      0.25,
-      0.50,
-      0.75,
-      1.00
-    ),
-    labels = c(
-      "0",
-      "0.25",
-      "0.50",
-      "0.75",
-      "1.00"
-    ),
+    breaks = c(0, 0.25, 0.50, 0.75, 1.00),
+    labels = c("0", "0.25", "0.50", "0.75", "1.00"),
     minor_breaks = NULL,
-    expand = expansion(
-      mult = c(0, 0)
-    )
+    expand = expansion(mult = c(0, 0))
   ) +
-  coord_cartesian(
-    xlim = c(0.25, 2.00),
-    ylim = c(-0.02, 1.02)
-  ) +
+  coord_cartesian(xlim = c(0.25, 2.00), ylim = c(-0.02, 1.02)) +
   labs(
     x = "Interval half-width",
     y = "Conditional coverage",
@@ -1099,19 +706,11 @@ figure5_disaster_coverage_decomposition <- ggplot(
     linetype = NULL
   ) +
   guides(
-    colour = guide_legend(
-      nrow = 1,
-      byrow = TRUE
-    ),
-    linetype = guide_legend(
-      nrow = 1,
-      byrow = TRUE
-    )
+    colour = guide_legend(nrow = 1, byrow = TRUE),
+    linetype = guide_legend(nrow = 1, byrow = TRUE)
   ) +
   theme_modal_paper() +
-  theme(
-    panel.spacing.x = fixed_width_panel_spacing
-  )
+  theme(panel.spacing.x = fixed_width_panel_spacing)
 
 figure5_path <- file.path(
   figure_directory,
@@ -1127,4 +726,3 @@ ggsave(
   units = "in",
   bg = "white"
 )
-

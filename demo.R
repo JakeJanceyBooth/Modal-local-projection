@@ -11,16 +11,11 @@ set.seed(demo_seed)
 
 # Simulate a Gaussian DGP. Mean, median, and modal responses share the
 # same population target in this design.
-simulation <- simulate_gaussian_dgp(
-  T = sample_size,
-  horizon = max(horizons)
-)
-
+simulation <- simulate_gaussian_dgp(T = sample_size, horizon = max(horizons))
 data <- simulation$data
 
 # LPs condition on the current outcome y_t.
 controls <- data$y
-
 mean_fit <- fit_mean_lp(
   y = data$y,
   x = data$x,
@@ -45,11 +40,7 @@ modal_fit <- fit_modal_lp(
 )
 
 # VAR(1) in the observed shock and outcome.
-var_fit <- fit_var(
-  data = data[, c("x", "y")],
-  lags = 1L
-)
-
+var_fit <- fit_var(data = data[, c("x", "y")], lags = 1L)
 var_irf <- var_response(
   fitted_var = var_fit,
   shock = "x",
@@ -61,9 +52,8 @@ benchmark <- simulation$true_response$response[
   match(horizons, simulation$true_response$horizon)
 ]
 
-# "estimate" denotes the estimated horizon-h response 
+# "estimate" denotes the estimated horizon-h response
 # to a \delta = 1 shock in x_t
-
 demo_results <- rbind(
   data.frame(
     horizon = horizons,
@@ -98,9 +88,7 @@ demo_results <- rbind(
   data.frame(
     horizon = horizons,
     estimator = "VAR",
-    estimate = var_irf$response[
-      match(horizons, var_irf$horizon)
-    ],
+    estimate = var_irf$response[match(horizons, var_irf$horizon)],
     benchmark = benchmark,
     bandwidth = NA_real_,
     iterations = NA_integer_,
@@ -112,10 +100,7 @@ demo_results <- rbind(
 demo_results <- demo_results[
   order(
     demo_results$horizon,
-    match(
-      demo_results$estimator,
-      c("Mean LP", "Median LP", "Modal LP", "VAR")
-    )
+    match(demo_results$estimator, c("Mean LP", "Median LP", "Modal LP", "VAR"))
   ),
 ]
 

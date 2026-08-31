@@ -1,162 +1,110 @@
 #construct horizon-h LP data
 .prepare_lp_data <- function(y, x, z = NULL, h) {
-  
   # input checks
   y <- as.numeric(y)
   x <- as.numeric(x)
   T <- length(y)
-  
+
   if (length(x) != T) {
     stop("y and x must have the same length.")
   }
-  
+
   if (length(h) != 1 || h < 0 || h >= T || h != as.integer(h)) {
     stop("h must be a non-negative integer smaller than T.")
   }
-  
+
   if (is.null(z)) {
-    
     z <- matrix(numeric(0), nrow = T, ncol = 0)
-    
   } else {
-    
     if (is.vector(z)) {
       z <- matrix(z, ncol = 1)
     } else {
       z <- as.matrix(z)
     }
-    
+
     if (nrow(z) != T) {
       stop("z must have T rows.")
     }
-    
+
     if (is.null(colnames(z))) {
       colnames(z) <- paste0("z", seq_len(ncol(z)))
     }
   }
 
-  if (
-    any(!is.finite(y)) ||
-    any(!is.finite(x)) ||
-    any(!is.finite(z))
-  ) {
+  if (any(!is.finite(y)) || any(!is.finite(x)) || any(!is.finite(z))) {
     stop("Missing/non-finite values are not supported.")
   }
-  
+
   n_h <- T - h
   idx <- seq_len(n_h)
-  
   y_h <- y[idx + h]
   x_h <- x[idx]
   z_h <- z[idx, , drop = FALSE]
-  
-  D_h <- cbind(
-    alpha = 1,
-    beta = x_h
-  )
-  
+  D_h <- cbind(alpha = 1, beta = x_h)
+
   if (ncol(z_h) > 0) {
     colnames(z_h) <- paste0("gamma_", colnames(z_h))
     D_h <- cbind(D_h, z_h)
   }
-  
-  list(
-    y_h = y_h,
-    D_h = D_h,
-    n_h = n_h
-  )
+
+  list(y_h = y_h, D_h = D_h, n_h = n_h)
 }
 
 # LP prediction and response function. Works for any LP
 lp_predict <- function(fitted_lp, x, z = NULL) {
-  
   coefficients <- fitted_lp$coefficients
-  
-  if (
-    is.null(coefficients) ||
-    is.null(colnames(coefficients)) ||
-    !all(c("alpha", "beta") %in% colnames(coefficients))
-  ) {
+
+  if (is.null(coefficients) ||
+      is.null(colnames(coefficients)) ||
+      !all(c("alpha", "beta") %in% colnames(coefficients))) {
     stop("fitted_lp is not a supported LP object.")
   }
-  
+
   if (length(x) != 1L || !is.finite(x)) {
     stop("x must be a single finite number.")
   }
-  
+
   x <- as.numeric(x)
-  
-  control_columns <- setdiff(
-    colnames(coefficients),
-    c("alpha", "beta")
-  )
-  
+  control_columns <- setdiff(colnames(coefficients), c("alpha", "beta"))
+
   if (length(control_columns) == 0L) {
-    
     if (!is.null(z) && length(z) > 0L) {
       stop("z must be NULL because the fitted model has no controls.")
     }
-    
+
     z <- numeric(0)
-    
   } else {
-    
     if (is.null(z)) {
-      stop(
-        "z must be supplied because the fitted model includes controls."
-      )
+      stop("z must be supplied because the fitted model includes controls.")
     }
-    
+
     z <- as.numeric(z)
-    
+
     if (length(z) != length(control_columns)) {
       stop("z must contain one value for each fitted control.")
     }
-    
+
     if (any(!is.finite(z))) {
       stop("z must contain only finite values.")
     }
   }
-  
+
   # z must be supplied in the same order used during estimation
-  design_row <- c(
-    alpha = 1,
-    beta = x,
-    setNames(z, control_columns)
-  )
-  
-  prediction <- as.numeric(
-    coefficients %*%
-      design_row[colnames(coefficients)]
-  )
-  
-  data.frame(
-    horizon = fitted_lp$horizons,
-    x = x,
-    prediction = prediction
-  )
+  design_row <- c(alpha = 1, beta = x, setNames(z, control_columns))
+  prediction <- as.numeric(coefficients %*% design_row[colnames(coefficients)])
+
+  data.frame(horizon = fitted_lp$horizons, x = x, prediction = prediction)
 }
 
 lp_response <- function(fitted_lp, x, z = NULL, delta = 1) {
-  
   if (length(delta) != 1L || !is.finite(delta)) {
     stop("delta must be a single finite number.")
   }
-  
+
   delta <- as.numeric(delta)
-  
-  baseline <- lp_predict(
-    fitted_lp = fitted_lp,
-    x = x,
-    z = z
-  )
-  
-  shocked <- lp_predict(
-    fitted_lp = fitted_lp,
-    x = x + delta,
-    z = z
-  )
-  
+  baseline <- lp_predict(fitted_lp = fitted_lp, x = x, z = z)
+  shocked <- lp_predict(fitted_lp = fitted_lp, x = x + delta, z = z)
+
   data.frame(
     horizon = baseline$horizon,
     x_baseline = baseline$x,
@@ -170,37 +118,20 @@ lp_response <- function(fitted_lp, x, z = NULL, delta = 1) {
 
 # Mean Local Projection
 fit_mean_lp <- function(y, x, z = NULL, horizons) {
-  
   horizons <- sort(unique(horizons))
-  
+
   if (length(horizons) == 0) {
     stop("At least one horizon must be supplied.")
   }
-  
+
   fits <- lapply(horizons, function(h) {
-    
-    dat <- .prepare_lp_data(
-      y = y,
-      x = x,
-      z = z,
-      h = h
-    )
-    
-    fit_h <- lm.fit(
-      x = dat$D_h,
-      y = dat$y_h
-    )
-    
+    dat <- .prepare_lp_data(y = y, x = x, z = z, h = h)
+    fit_h <- lm.fit(x = dat$D_h, y = dat$y_h)
+
     if (fit_h$rank < ncol(dat$D_h)) {
-      stop(
-        paste0(
-          "Design matrix is rank deficient at horizon h = ",
-          h,
-          "."
-        )
-      )
+      stop(paste0("Design matrix is rank deficient at horizon h = ", h, "."))
     }
-    
+
     list(
       coefficients = setNames(
         as.numeric(fit_h$coefficients),
@@ -209,24 +140,15 @@ fit_mean_lp <- function(y, x, z = NULL, horizons) {
       n_h = dat$n_h
     )
   })
-  
+
   # Stack \hat\theta_h across horizons
-  coefficients <- do.call(
-    rbind,
-    lapply(fits, function(fit) fit$coefficients)
-  )
-  
+  coefficients <- do.call(rbind, lapply(fits, function(fit) fit$coefficients))
   rownames(coefficients) <- paste0("h_", horizons)
-  
+
   # Extract \hat\beta_h in particular
   beta <- coefficients[, "beta"]
-  
-  n_h <- vapply(
-    fits,
-    function(fit) fit$n_h,
-    numeric(1)
-  )
-  
+  n_h <- vapply(fits, function(fit) fit$n_h, numeric(1))
+
   list(
     method = "mean_lp",
     horizons = horizons,
@@ -238,33 +160,20 @@ fit_mean_lp <- function(y, x, z = NULL, horizons) {
 
 # Median local projection
 fit_median_lp <- function(y, x, z = NULL, horizons) {
-  
   horizons <- sort(unique(horizons))
-  
+
   if (length(horizons) == 0L) {
     stop("At least one horizon must be supplied.")
   }
-  
+
   fits <- lapply(horizons, function(h) {
-    
-    dat <- .prepare_lp_data(
-      y = y,
-      x = x,
-      z = z,
-      h = h
-    )
-    
+    dat <- .prepare_lp_data(y = y, x = x, z = z, h = h)
+
     # Check that theta_h is identified
     if (qr(dat$D_h)$rank < ncol(dat$D_h)) {
-      stop(
-        paste0(
-          "Design matrix is rank deficient at horizon h = ",
-          h,
-          "."
-        )
-      )
+      stop(paste0("Design matrix is rank deficient at horizon h = ", h, "."))
     }
-    
+
     # Horizon-h median regression
     fit_h <- quantreg::rq.fit(
       x = dat$D_h,
@@ -272,7 +181,7 @@ fit_median_lp <- function(y, x, z = NULL, horizons) {
       tau = 0.5,
       method = "br"
     )
-    
+
     list(
       coefficients = setNames(
         as.numeric(fit_h$coefficients),
@@ -281,24 +190,15 @@ fit_median_lp <- function(y, x, z = NULL, horizons) {
       n_h = dat$n_h
     )
   })
-  
+
   # Stack \hat\theta_h' across horizons
-  coefficients <- do.call(
-    rbind,
-    lapply(fits, function(fit) fit$coefficients)
-  )
-  
+  coefficients <- do.call(rbind, lapply(fits, function(fit) fit$coefficients))
   rownames(coefficients) <- paste0("h_", horizons)
-  
+
   # Extract \hat\beta_h in particular
   beta <- coefficients[, "beta"]
-  
-  n_h <- vapply(
-    fits,
-    function(fit) fit$n_h,
-    numeric(1)
-  )
-  
+  n_h <- vapply(fits, function(fit) fit$n_h, numeric(1))
+
   list(
     method = "median_lp",
     horizons = horizons,
@@ -310,43 +210,35 @@ fit_median_lp <- function(y, x, z = NULL, horizons) {
 
 # Modal local projection
 .modal_objective <- function(theta, y_h, D_h, bandwidth) {
-  
   if (bandwidth <= 0) {
     stop("bandwidth must be positive.")
   }
-  
+
   residuals <- y_h - D_h %*% theta
-  
-  mean(
-    dnorm(residuals/bandwidth)
-  ) / bandwidth
+  mean(dnorm(residuals / bandwidth)) / bandwidth
 }
 
 .fit_mem <- function(theta_start, y_h, D_h, bandwidth,
                      tol_theta = 1e-6,
                      tol_objective = 1e-8,
                      max_iter = 1000) {
-  
   if (any(!is.finite(theta_start))) {
     stop("theta_start must contain only finite values.")
   }
-  
+
   theta <- theta_start
   objective <- .modal_objective(theta, y_h, D_h, bandwidth)
-  
   converged <- FALSE
   failure <- "max_iterations"
-  
+
   for (g in seq_len(max_iter)) {
-    
     # E-step
     residuals <- y_h - as.numeric(D_h %*% theta)
     weights <- dnorm(residuals / bandwidth)
-    
+
     # ensure weights are all finite and non-degenerate
     if (any(!is.finite(weights)) ||
         sum(weights) <= .Machine$double.eps) {
-      
       return(list(
         coefficients = theta,
         objective = objective,
@@ -355,15 +247,10 @@ fit_median_lp <- function(y, x, z = NULL, horizons) {
         failure = "degenerate_weights"
       ))
     }
-    
+
     # M-step
-    
-    fit <- lm.wfit(
-      x = D_h,
-      y = y_h,
-      w = weights
-    )
-    
+    fit <- lm.wfit(x = D_h, y = y_h, w = weights)
+
     # ensure non-singular weighted design matrix
     if (fit$rank < ncol(D_h)) {
       return(list(
@@ -374,9 +261,9 @@ fit_median_lp <- function(y, x, z = NULL, horizons) {
         failure = "weighted_rank_deficiency"
       ))
     }
-    
+
     theta_new <- fit$coefficients
-    
+
     if (any(!is.finite(theta_new))) {
       return(list(
         coefficients = theta,
@@ -386,30 +273,23 @@ fit_median_lp <- function(y, x, z = NULL, horizons) {
         failure = "nonfinite_coefficients"
       ))
     }
-    
-    objective_new <- .modal_objective(
-      theta_new,
-      y_h,
-      D_h,
-      bandwidth
-    )
-    
+
+    objective_new <- .modal_objective(theta_new, y_h, D_h, bandwidth)
+
     # Check stopping criterion
-    if (
-      sqrt(sum((theta_new - theta)^2)) < tol_theta &&
-      abs(objective_new - objective) < tol_objective
-    ) {
+    if (sqrt(sum((theta_new - theta)^2)) < tol_theta &&
+        abs(objective_new - objective) < tol_objective) {
       theta <- theta_new
       objective <- objective_new
       converged <- TRUE
       failure <- NULL
       break
     }
-    
+
     theta <- theta_new
     objective <- objective_new
   }
-  
+
   list(
     coefficients = theta,
     objective = objective,
@@ -426,79 +306,43 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
                          tol_objective = 1e-8,
                          max_iter = 1000,
                          return_start_diagnostics = FALSE) {
-  
   horizons <- sort(unique(horizons))
-  
+
   if (length(horizons) == 0) {
     stop("At least one horizon must be supplied.")
   }
-  
+
   if (!is.finite(bw_constant) || bw_constant <= 0) {
     stop("bw_constant must be positive and finite.")
   }
-  
-  if (
-    length(start_quantiles) == 0 ||
-    any(!is.finite(start_quantiles)) ||
-    any(start_quantiles <= 0 | start_quantiles >= 1)
-  ) {
+
+  if (length(start_quantiles) == 0 ||
+      any(!is.finite(start_quantiles)) ||
+      any(start_quantiles <= 0 | start_quantiles >= 1)) {
     stop("start_quantiles must lie strictly between zero and one.")
   }
-  
+
   start_quantiles <- sort(unique(start_quantiles))
-  
   fits <- lapply(horizons, function(h) {
-    
-    dat <- .prepare_lp_data(
-      y = y,
-      x = x,
-      z = z,
-      h = h
-    )
-    
+    dat <- .prepare_lp_data(y = y, x = x, z = z, h = h)
+
     # Ensure theta_h is identified
     if (qr(dat$D_h)$rank < ncol(dat$D_h)) {
-      stop(
-        paste0(
-          "Design matrix is rank deficient at horizon h = ",
-          h,
-          "."
-        )
-      )
+      stop(paste0("Design matrix is rank deficient at horizon h = ", h, "."))
     }
-    
+
     # OLS starting value + bandwidth selection rule
-    
-    ols_fit <- lm.fit(
-      x = dat$D_h,
-      y = dat$y_h
-    )
-    
+    ols_fit <- lm.fit(x = dat$D_h, y = dat$y_h)
     theta_ols <- ols_fit$coefficients
-    
-    ols_residuals <- dat$y_h -
-      as.numeric(dat$D_h %*% theta_ols)
-    
-    mad_h <- median(
-      abs(ols_residuals - median(ols_residuals))
-    )
-    
-    bandwidth <- bw_constant *
-      mad_h *
-      dat$n_h^(-0.143)
-    
+    ols_residuals <- dat$y_h - as.numeric(dat$D_h %*% theta_ols)
+    mad_h <- median(abs(ols_residuals - median(ols_residuals)))
+    bandwidth <- bw_constant * mad_h * dat$n_h^(-0.143)
+
     if (!is.finite(bandwidth) || bandwidth <= 0) {
-      stop(
-        paste0(
-          "Invalid bandwidth at horizon h = ",
-          h,
-          "."
-        )
-      )
+      stop(paste0("Invalid bandwidth at horizon h = ", h, "."))
     }
 
     # quantile-regression starting values
-    
     quantile_starts <- lapply(
       start_quantiles,
       function(tau) {
@@ -510,28 +354,20 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
         )$coefficients
       }
     )
-    
-    quantile_names <- paste0(
-      "q",
-      100 * start_quantiles
-    )
-    
+
+    quantile_names <- paste0("q", 100 * start_quantiles)
+
     # Preserve the current diagnostic label for the default start
     quantile_names[start_quantiles == 0.5] <- "median"
-    
+
     names(quantile_starts) <- quantile_names
-    
-    starts <- c(
-      list(ols = theta_ols),
-      quantile_starts
-    )
-    
+
+    starts <- c(list(ols = theta_ols), quantile_starts)
+
     # run MEM from each starting value
-    
     mem_runs <- lapply(
       starts,
       function(theta_start) {
-        
         .fit_mem(
           theta_start = theta_start,
           y_h = dat$y_h,
@@ -543,49 +379,36 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
         )
       }
     )
-    
+
     # identify successfully converged runs
     converged <- vapply(
-      mem_runs, 
+      mem_runs,
       function(run) {
         isTRUE(run$converged) &&
           is.finite(run$objective)
       },
       logical(1)
     )
-    
+
     # optional diagnostics for every starting value
-    
     start_diagnostics <- NULL
-    
+
     if (return_start_diagnostics) {
-      
       start_diagnostics <- data.frame(
         start = names(starts),
         converged = converged,
-        objective = vapply(
-          mem_runs,
-          function(run) run$objective,
-          numeric(1)
-        ),
-        iterations = vapply(
-          mem_runs,
-          function(run) run$iterations,
-          integer(1)
-        )
+        objective = vapply(mem_runs, function(run) run$objective, numeric(1)),
+        iterations = vapply(mem_runs, function(run) run$iterations, integer(1))
       )
-      
+
       start_diagnostics$coefficients <- lapply(
         mem_runs,
         function(run) {
-          setNames(
-            as.numeric(run$coefficients),
-            colnames(dat$D_h)
-          )
+          setNames(as.numeric(run$coefficients), colnames(dat$D_h))
         }
       )
     }
-    
+
     if (!any(converged)) {
       stop(
         paste0(
@@ -595,23 +418,18 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
         )
       )
     }
-    
+
     # choose converged run with largest objective
-    
     converged_indices <- which(converged)
-    
     objectives <- vapply(
       mem_runs[converged_indices],
       function(run) run$objective,
       numeric(1)
     )
-    
-    best_index <- converged_indices[
-      which.max(objectives)
-    ]
-    
+
+    best_index <- converged_indices[which.max(objectives)]
     best_fit <- mem_runs[[best_index]]
-    
+
     # Store horizon-specific results
     list(
       coefficients = setNames(
@@ -627,73 +445,37 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
       start_diagnostics = start_diagnostics
     )
   })
-  
+
   # Combine horizon-specific estimates
-  
-  coefficients <- do.call(
-    rbind,
-    lapply(fits, function(fit) fit$coefficients)
-  )
-  
+  coefficients <- do.call(rbind, lapply(fits, function(fit) fit$coefficients))
   rownames(coefficients) <- paste0("h_", horizons)
-  
+
   beta <- coefficients[, "beta"]
-  
-  n_h <- vapply(
-    fits,
-    function(fit) fit$n_h,
-    numeric(1)
-  )
-  
-  bandwidth <- vapply(
-    fits,
-    function(fit) fit$bandwidth,
-    numeric(1)
-  )
-  
-  objective <- vapply(
-    fits,
-    function(fit) fit$objective,
-    numeric(1)
-  )
-  
-  iterations <- vapply(
-    fits,
-    function(fit) fit$iterations,
-    integer(1)
-  )
-  
-  selected_start <- vapply(
-    fits,
-    function(fit) fit$selected_start,
-    character(1)
-  )
-  
+  n_h <- vapply(fits, function(fit) fit$n_h, numeric(1))
+  bandwidth <- vapply(fits, function(fit) fit$bandwidth, numeric(1))
+  objective <- vapply(fits, function(fit) fit$objective, numeric(1))
+  iterations <- vapply(fits, function(fit) fit$iterations, integer(1))
+  selected_start <- vapply(fits, function(fit) fit$selected_start, character(1))
   n_converged_starts <- vapply(
     fits,
     function(fit) fit$n_converged_starts,
     integer(1)
   )
-  
+
   start_diagnostics <- NULL
-  
+
   if (return_start_diagnostics) {
-    
     start_diagnostics <- lapply(
       seq_along(fits),
       function(i) {
-        
-        diagnostics_i <-
-          fits[[i]]$start_diagnostics
-        
-        diagnostics_i$horizon <-
-          horizons[i]
-        
+        diagnostics_i <- fits[[i]]$start_diagnostics
+        diagnostics_i$horizon <- horizons[i]
+
         diagnostics_i
       }
     )
   }
-  
+
   list(
     method = "modal_lp",
     horizons = horizons,
@@ -714,41 +496,31 @@ fit_modal_lp <- function(y, x, z = NULL, horizons,
 # Mean VAR: fit, prediction, and response function (assumes x is an
 # observed shock variable)
 fit_var <- function(data, lags, type = "const") {
-  
   data <- as.matrix(data)
-  
+
   if (!is.numeric(data)) {
     stop("data must contain only numeric variables.")
   }
-  
-  if (
-    is.null(colnames(data)) || any(colnames(data) == "")
-  ) {
+
+  if (is.null(colnames(data)) || any(colnames(data) == "")) {
     stop("Every variable in data must have a name.")
   }
-  
+
   if (any(!is.finite(data))) {
     stop("Missing and non-finite values are not currently supported.")
   }
-  
-  if (
-    !is.numeric(lags) ||
-    length(lags) != 1L ||
-    !is.finite(lags) ||
-    lags < 1 ||
-    lags != as.integer(lags)
-  ) {
+
+  if (!is.numeric(lags) ||
+      length(lags) != 1L ||
+      !is.finite(lags) ||
+      lags < 1 ||
+      lags != as.integer(lags)) {
     stop("lags must be a positive integer.")
   }
-  
+
   lags <- as.integer(lags)
-  
-  fit <- vars::VAR(
-    y = data,
-    p = lags,
-    type = type
-  )
-  
+  fit <- vars::VAR(y = data, p = lags, type = type)
+
   list(
     method = "var",
     variables = colnames(data),
@@ -760,12 +532,8 @@ fit_var <- function(data, lags, type = "const") {
 }
 
 var_predict <- function(fitted_var, variable, horizon) {
-  
-  forecasts <- predict(
-    fitted_var$fit,
-    n.ahead = horizon
-  )$fcst[[variable]]
-  
+  forecasts <- predict(fitted_var$fit, n.ahead = horizon)$fcst[[variable]]
+
   data.frame(
     horizon = seq_len(horizon),
     variable = variable,
@@ -773,34 +541,20 @@ var_predict <- function(fitted_var, variable, horizon) {
   )
 }
 
-var_response <- function(fitted_var, shock, response,
-                         horizon, delta = 1) {
-  
-  phi <- vars::Phi(
-    fitted_var$fit,
-    nstep = horizon
-  )
-  
-  shock_index <- match(
-    shock,
-    fitted_var$variables
-  )
-  
-  response_index <- match(
-    response,
-    fitted_var$variables
-  )
-  
+var_response <- function(fitted_var, shock, response, horizon, delta = 1) {
+  phi <- vars::Phi(fitted_var$fit, nstep = horizon)
+  shock_index <- match(shock, fitted_var$variables)
+  response_index <- match(response, fitted_var$variables)
+
   if (is.na(shock_index) || is.na(response_index)) {
     stop("shock and response must match the VAR variable names.")
   }
-  
+
   horizons <- seq_len(horizon)
-  
+
   # response, here, gets the coefficients mapping the reduced-form
-  # innovation of size \delta in x at time t to the value of y 
+  # innovation of size \delta in x at time t to the value of y
   # at h = 1, ..., H)
-  
   data.frame(
     horizon = horizons,
     shock = shock,
