@@ -1,6 +1,6 @@
 # Quick demonstration of the estimators and Gaussian benchmark DGP.
 
-source(file.path("R", "estimators.R"))
+source(file.path("R", "estimators.R"))git status
 source(file.path("R", "dgps.R"))
 
 demo_seed <- 12345
