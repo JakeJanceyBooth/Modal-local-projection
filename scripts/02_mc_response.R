@@ -14,7 +14,7 @@ bw_constant <- 2.4
 start_quantiles <- 0.5
 H <- 20
 horizons <- seq_len(H)
-n_replications <- 1000
+n_replications <- 10
 dgp_names <- c("gaussian", "skewed", "disaster", "rich_state", "downside_risk")
 estimator_names <- c("Mean LP", "Median LP", "Modal LP", "VAR")
 cheap_estimators <- c("Mean LP", "Median LP", "VAR")
@@ -408,6 +408,36 @@ response_comparison_summary <- dplyr::bind_rows(
     match(estimator, estimator_names),
     sample_size,
     horizon
+  )
+
+response_plot_data <-
+  response_comparison_summary |>
+  left_join(
+    response_truth,
+    by = c(
+      "dgp",
+      "estimator",
+      "horizon"
+    )
+  ) |>
+  mutate(
+    estimator = factor(
+      estimator,
+      levels = c(
+        "Mean LP",
+        "Median LP",
+        "Modal LP",
+        "VAR"
+      )
+    ),
+    average_estimate = mean_estimate,
+    mcse = sqrt(
+      variance / n_success
+    ),
+    mc_lower =
+      average_estimate - 1.96 * mcse,
+    mc_upper =
+      average_estimate + 1.96 * mcse
   )
 
 # extract population truths ----

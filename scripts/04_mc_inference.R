@@ -9,7 +9,7 @@ source(file.path("R", "dgps.R"))
 dgp_names <- c("gaussian", "skewed", "disaster")
 sample_sizes <- c(250L, 1000L)
 horizons <- c(1L, 5L, 20L)
-n_outer_replications <- 100
+n_outer_replications <- 10
 n_bootstrap_replications <- 199
 min_bootstrap_success_rate <- 0.90
 confidence_level <- 0.95

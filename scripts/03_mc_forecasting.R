@@ -18,7 +18,7 @@ sample_sizes <- c(250, 500, 1000)
 horizons <- c(1, 2, 5, 10)
 estimator_names <- c("Mean LP", "Median LP", "Modal LP", "VAR")
 n_forecast_origins <- 20
-n_replications <- 5000
+n_replications <- 10
 bw_constant <- 2.4
 start_quantiles <- 0.5
 disaster_probability <- 0.05
@@ -27,6 +27,7 @@ mc_seed <- 12345
 max_sample_size <- max(sample_sizes)
 H <- max(horizons)
 validate_var_recursion <- TRUE
+var_recursion_validated <- !validate_var_recursion
 
 # Retain exact DGP parameters
 dgp_parameters <- vector("list", length(dgp_names))
@@ -38,7 +39,7 @@ estimation_cutoff <- max_sample_size
 simulation_size <- max_sample_size + n_forecast_origins - 1 + H
 forecast_origins <- estimation_cutoff + 0:(n_forecast_origins - 1)
 half_widths <- c(0.25, 0.50, 0.75, 1.00, 1.50, 2.00)
-forecast_design_label <- "fixed_width_coverage"
+forecast_design_label <- "fixed_width_coverage_dgp3_p05_d7p5"
 results_directory <- file.path("results", "forecasting")
 
 dir.create(results_directory, recursive = TRUE, showWarnings = FALSE)

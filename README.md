@@ -42,7 +42,7 @@ hours to complete a full run.
 
 Monte Carlo summaries are calculated over successful model fits or forecasts.
 Success counts and rates are reported separately. Failed numerical fits are 
-treated as unsuccessful observations and excluded .
+treated as unsuccessful observations and excluded.
 
 ## Results and figures
 

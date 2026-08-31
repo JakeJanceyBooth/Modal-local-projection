@@ -19,7 +19,7 @@ start_schemes <- list(
   six_starts = c(0.10, 0.25, 0.50, 0.75, 0.90)
 )
 
-n_replications <- 100
+n_replications <- 10
 max_sample_size <- max(sample_sizes)
 H <- max(horizons)
 
@@ -690,9 +690,4 @@ saveRDS(
     results_directory,
     paste0("start_diagnostics_summary_", run_label, ".rds")
   )
-)
-
-saveRDS(
-  sensitivity_plots,
-  file.path(results_directory, paste0("sensitivity_plots_", run_label, ".rds"))
 )
