@@ -628,7 +628,7 @@ sensitivity_run_settings <- list(
   start_schemes = start_schemes,
   n_replications = n_replications,
   mc_seed = mc_seed,
-  session_info = utils::sessionInfo(),
+  session_info = utils::sessionInfo()
 )
 
 saveRDS(

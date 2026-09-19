@@ -351,7 +351,7 @@ response_run_settings <- list(
   mc_seed = mc_seed,
   bw_constant = bw_constant,
   start_quantiles = start_quantiles,
-  session_info = utils::sessionInfo(),
+  session_info = utils::sessionInfo()
 )
 
 saveRDS(
@@ -410,6 +410,15 @@ response_comparison_summary <- dplyr::bind_rows(
     horizon
   )
 
+# extract population truths ----
+response_truth <- bind_rows(
+  modal_results |>
+    dplyr::select(dgp, estimator, horizon, truth),
+  other_results |>
+    dplyr::select(dgp, estimator, horizon, truth)
+) |>
+  distinct()
+
 response_plot_data <-
   response_comparison_summary |>
   left_join(
@@ -440,14 +449,6 @@ response_plot_data <-
       average_estimate + 1.96 * mcse
   )
 
-# extract population truths ----
-response_truth <- bind_rows(
-  modal_results |>
-    dplyr::select(dgp, estimator, horizon, truth),
-  other_results |>
-    dplyr::select(dgp, estimator, horizon, truth)
-) |>
-  distinct()
 
 # save everything .RDS----
 saveRDS(

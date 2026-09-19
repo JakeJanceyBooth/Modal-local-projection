@@ -10,7 +10,7 @@ response_results_path <- file.path(
 )
 
 forecast_run_label <- paste0(
-  "fixed_width_coverage_",
+  "fixed_width_coverage_dgp3_p05_d7p5_",
   "R5000_O20_h1-2-5-10"
 )
 
